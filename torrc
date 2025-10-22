@@ -1,0 +1,7 @@
+# Tor configuration for Switzerland exit
+SOCKSPort 127.0.0.1:9050
+ExitNodes {ch}
+StrictNodes 1
+Log notice file /data/data/com.termux/files/home/vpn_v2/tor.log
+DataDirectory /data/data/com.termux/files/home/vpn_v2/tor_data
+

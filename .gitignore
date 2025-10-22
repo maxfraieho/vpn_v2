@@ -1,0 +1,19 @@
+# Log files
+*.log
+
+# Process ID files
+*.pid
+
+# Configuration that might contain sensitive data
+config.json
+
+# Tor data directory
+tor_data/
+
+# Python cache
+__pycache__/
+
+# Temporary files
+*.tmp
+*.temp
+.DS_Store

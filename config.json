@@ -1,0 +1,28 @@
+{
+  "accounts": {
+    "arsen.k111999@gmail.com": {
+      "name": "Син (Arsen)",
+      "proxy_port": 8888,
+      "upstream": {
+        "type": "direct",
+        "name": "Tailscale (100.100.74.9)"
+      },
+      "cookies_file": "/data/data/com.termux/files/home/.cookies_arsen.json",
+      "password": "YOUR_PASSWORD"
+    },
+    "lekov00@gmail.com": {
+      "name": "Дружина (Lena)",
+      "proxy_port": 8889,
+      "upstream": {
+        "type": "tor",
+        "socks_host": "127.0.0.1",
+        "socks_port": 9050,
+        "name": "Tor (Switzerland exit)"
+      },
+      "cookies_file": "/data/data/com.termux/files/home/.cookies_lena.json",
+      "password": "YOUR_PASSWORD"
+    }
+  },
+  "survey_service_port": 8090,
+  "tailscale_ip": "100.100.74.9"
+}
