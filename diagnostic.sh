@@ -1,98 +1,276 @@
-#!/bin/bash
-# Діагностика системи VPN v2
+#!/data/data/com.termux/files/usr/bin/bash
 
-echo "🔍 Діагностика системи VPN v2"
-echo "============================="
+# VPN v2 Diagnostic Script
 
-# Перевірка Tor
-echo "1. Перевірка Tor сервісу..."
-if netstat -tuln 2>/dev/null | grep -q ":9050 "; then
-    echo "   ✅ Tor працює на порті 9050"
-else
-    echo "   ❌ Tor НЕ працює на порті 9050"
-fi
+SETUP_DIR="$HOME/vpn_v2"
 
-# Перевірка портів проксі
-echo "2. Перевірка портів проксі..."
-if netstat -tuln 2>/dev/null | grep -q ":8888 "; then
-    echo "   ❌ Порт 8888 вже використовується"
-else
-    echo "   ✅ Порт 8888 вільний"
-fi
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
 
-if netstat -tuln 2>/dev/null | grep -q ":8889 "; then
-    echo "   ❌ Порт 8889 вже використовується"
-else
-    echo "   ✅ Порт 8889 вільний"
-fi
-
-# Перевірка процесів
-echo "3. Перевірка процесів..."
-if pgrep -f "tor" > /dev/null; then
-    echo "   ✅ Процес Tor запущений"
-else
-    echo "   ❌ Процес Tor НЕ запущений"
-fi
-
-if pgrep -f "smart_proxy_v2" > /dev/null; then
-    echo "   ✅ Процес Smart Proxy запущений"
-else
-    echo "   ❌ Процес Smart Proxy НЕ запущений"
-fi
-
-if pgrep -f "survey_automation_v2" > /dev/null; then
-    echo "   ✅ Процес Survey Automation запущений"
-else
-    echo "   ❌ Процес Survey Automation НЕ запущений"
-fi
-
-# Перевірка Tailscale IP
-echo "4. Перевірка Tailscale IP..."
-if curl -s --socks5-hostname 100.100.74.9:9050 https://ipapi.co/json/ 2>/dev/null | grep -q "CH"; then
-    echo "   ✅ Tailscale IP 100.100.74.9:9050 працює (Швейцарія)"
-else
-    echo "   ❌ Tailscale IP 100.100.74.9:9050 НЕ працює"
-fi
-
-# Перевірка модулів Python
-echo "5. Перевірка необхідних модулів Python..."
-if python3 -c "import aiohttp" 2>/dev/null; then
-    echo "   ✅ aiohttp встановлено"
-else
-    echo "   ❌ aiohttp НЕ встановлено"
-fi
-
-if python3 -c "import aiohttp_socks" 2>/dev/null; then
-    echo "   ✅ aiohttp_socks встановлено"
-else
-    echo "   ❌ aiohttp_socks НЕ встановлено"
-fi
-
-if python3 -c "import playwright" 2>/dev/null; then
-    echo "   ✅ playwright встановлено"
-else
-    echo "   ❌ playwright НЕ встановлено (впливає на Survey Automation)"
-fi
-
-# Перевірка файлів конфігурації
-echo "6. Перевірка файлів конфігурації..."
-if [ -f "config.json" ]; then
-    echo "   ✅ config.json існує"
-    echo "   Деталі конфігурації:"
-    python3 -c "import json; c=json.load(open('config.json')); print(f'  - Кількість облікових записів: {len(c[\"accounts\"])}'); [print(f'  - {email}: порт {acc[\"proxy_port\"]}') for email, acc in c['accounts'].items()]"
-else
-    echo "   ❌ config.json НЕ існує"
-fi
-
-if [ -f "torrc" ]; then
-    echo "   ✅ torrc існує"
-else
-    echo "   ❌ torrc НЕ існує"
-fi
-
+echo -e "${BLUE}================================${NC}"
+echo -e "${BLUE}VPN v2 Diagnostic Tool${NC}"
+echo -e "${BLUE}================================${NC}"
 echo ""
-echo "💡 Рекомендації:"
-echo "   - Якщо є проблеми з проксі, перевірте занятість портів 8888/8889"
-echo "   - Якщо Survey Automation не працює, спробуйте встановити playwright або знайти альтернативу"
-echo "   - Для перевірки Tor проксі: curl --socks5-hostname 100.100.74.9:9050 https://ipapi.co/json/"
-echo ""
+
+check_files() {
+    echo -e "${YELLOW}[1/6] Checking required files...${NC}"
+    
+    local files=(
+        "config.json"
+        "smart_proxy_v2.py"
+        "survey_automation_v2.py"
+        "manager_v2.sh"
+        "torrc"
+    )
+    
+    local missing=0
+    for file in "${files[@]}"; do
+        if [ -f "$SETUP_DIR/$file" ]; then
+            echo -e "  ${GREEN}✓${NC} $file"
+        else
+            echo -e "  ${RED}✗${NC} $file (missing)"
+            missing=$((missing + 1))
+        fi
+    done
+    
+    if [ $missing -eq 0 ]; then
+        echo -e "${GREEN}All required files present${NC}"
+    else
+        echo -e "${RED}Missing $missing files${NC}"
+    fi
+    echo ""
+}
+
+check_dependencies() {
+    echo -e "${YELLOW}[2/6] Checking dependencies...${NC}"
+    
+    # Check Python
+    if command -v python3 &> /dev/null; then
+        local py_version=$(python3 --version)
+        echo -e "  ${GREEN}✓${NC} Python3: $py_version"
+    else
+        echo -e "  ${RED}✗${NC} Python3 not found"
+    fi
+    
+    # Check Tor
+    if command -v tor &> /dev/null; then
+        local tor_version=$(tor --version | head -n 1)
+        echo -e "  ${GREEN}✓${NC} Tor: $tor_version"
+    else
+        echo -e "  ${RED}✗${NC} Tor not installed"
+    fi
+    
+    # Check Python packages
+    echo ""
+    echo "  Python packages:"
+    for pkg in aiohttp aiohttp-socks requests beautifulsoup4; do
+        if python3 -c "import ${pkg//-/_}" 2>/dev/null; then
+            echo -e "    ${GREEN}✓${NC} $pkg"
+        else
+            echo -e "    ${RED}✗${NC} $pkg (missing)"
+        fi
+    done
+    echo ""
+}
+
+check_ports() {
+    echo -e "${YELLOW}[3/6] Checking ports...${NC}"
+    
+    local ports=(9050 8888 8889 8090)
+    
+    for port in "${ports[@]}"; do
+        if netstat -tuln 2>/dev/null | grep -q ":$port "; then
+            local pid=$(lsof -ti:$port 2>/dev/null || fuser $port/tcp 2>/dev/null)
+            if [ ! -z "$pid" ]; then
+                local proc=$(ps -p $pid -o comm= 2>/dev/null)
+                echo -e "  ${GREEN}✓${NC} Port $port: in use by $proc (PID $pid)"
+            else
+                echo -e "  ${GREEN}✓${NC} Port $port: in use"
+            fi
+        else
+            echo -e "  ${YELLOW}○${NC} Port $port: available"
+        fi
+    done
+    echo ""
+}
+
+check_processes() {
+    echo -e "${YELLOW}[4/6] Checking processes...${NC}"
+    
+    # Check Tor
+    if pgrep -f "tor -f" > /dev/null; then
+        local tor_pid=$(pgrep -f "tor -f")
+        echo -e "  ${GREEN}✓${NC} Tor running (PID $tor_pid)"
+    else
+        echo -e "  ${RED}✗${NC} Tor not running"
+    fi
+    
+    # Check Proxy
+    if pgrep -f "smart_proxy" > /dev/null; then
+        local proxy_pid=$(pgrep -f "smart_proxy")
+        echo -e "  ${GREEN}✓${NC} Smart Proxy running (PID $proxy_pid)"
+    else
+        echo -e "  ${RED}✗${NC} Smart Proxy not running"
+    fi
+    
+    # Check Survey
+    if pgrep -f "survey_automation" > /dev/null; then
+        local survey_pid=$(pgrep -f "survey_automation")
+        echo -e "  ${GREEN}✓${NC} Survey Automation running (PID $survey_pid)"
+    else
+        echo -e "  ${RED}✗${NC} Survey Automation not running"
+    fi
+    echo ""
+}
+
+check_connectivity() {
+    echo -e "${YELLOW}[5/6] Checking connectivity...${NC}"
+    
+    # Check internet
+    if ping -c 1 8.8.8.8 &> /dev/null; then
+        echo -e "  ${GREEN}✓${NC} Internet connection: OK"
+    else
+        echo -e "  ${RED}✗${NC} No internet connection"
+    fi
+    
+    # Check Tor
+    if curl -s --socks5 127.0.0.1:9050 --connect-timeout 10 https://check.torproject.org/ | grep -q "Congratulations"; then
+        echo -e "  ${GREEN}✓${NC} Tor connection: OK"
+        local tor_ip=$(curl -s --socks5 127.0.0.1:9050 https://ipapi.co/ip)
+        local tor_country=$(curl -s --socks5 127.0.0.1:9050 https://ipapi.co/country_code)
+        echo -e "      IP: $tor_ip ($tor_country)"
+    else
+        echo -e "  ${RED}✗${NC} Tor connection failed"
+    fi
+    
+    # Check Tailscale
+    if command -v tailscale &> /dev/null; then
+        if tailscale status &> /dev/null; then
+            echo -e "  ${GREEN}✓${NC} Tailscale: connected"
+        else
+            echo -e "  ${YELLOW}○${NC} Tailscale: not connected"
+        fi
+    else
+        echo -e "  ${YELLOW}○${NC} Tailscale: not installed"
+    fi
+    echo ""
+}
+
+check_logs() {
+    echo -e "${YELLOW}[6/6] Checking logs for errors...${NC}"
+    
+    # Check proxy log
+    if [ -f "$SETUP_DIR/proxy.log" ]; then
+        local proxy_errors=$(grep -i "error" "$SETUP_DIR/proxy.log" | tail -n 3)
+        if [ ! -z "$proxy_errors" ]; then
+            echo -e "  ${RED}!${NC} Recent proxy errors:"
+            echo "$proxy_errors" | sed 's/^/      /'
+        else
+            echo -e "  ${GREEN}✓${NC} Proxy log: no recent errors"
+        fi
+    fi
+    
+    # Check survey log
+    if [ -f "$SETUP_DIR/survey.log" ]; then
+        local survey_errors=$(grep -i "error" "$SETUP_DIR/survey.log" | tail -n 3)
+        if [ ! -z "$survey_errors" ]; then
+            echo -e "  ${RED}!${NC} Recent survey errors:"
+            echo "$survey_errors" | sed 's/^/      /'
+        else
+            echo -e "  ${GREEN}✓${NC} Survey log: no recent errors"
+        fi
+    fi
+    
+    # Check tor log
+    if [ -f "$SETUP_DIR/tor.log" ]; then
+        local tor_errors=$(grep -i "error\|warn" "$SETUP_DIR/tor.log" | tail -n 3)
+        if [ ! -z "$tor_errors" ]; then
+            echo -e "  ${YELLOW}!${NC} Recent Tor warnings:"
+            echo "$tor_errors" | sed 's/^/      /'
+        else
+            echo -e "  ${GREEN}✓${NC} Tor log: no recent errors"
+        fi
+    fi
+    echo ""
+}
+
+recommendations() {
+    echo -e "${BLUE}================================${NC}"
+    echo -e "${BLUE}Recommendations${NC}"
+    echo -e "${BLUE}================================${NC}"
+    echo ""
+    
+    # Check if services are running
+    if ! pgrep -f "tor -f" > /dev/null; then
+        echo -e "${YELLOW}•${NC} Tor is not running. Start with: ./manager_v2.sh start"
+    fi
+    
+    if ! pgrep -f "smart_proxy" > /dev/null; then
+        echo -e "${YELLOW}•${NC} Smart Proxy is not running. Check proxy.log for errors"
+    fi
+    
+    # Check for missing dependencies
+    if ! python3 -c "import aiohttp_socks" 2>/dev/null; then
+        echo -e "${YELLOW}•${NC} Install missing dependency: pip install aiohttp-socks"
+    fi
+    
+    if ! python3 -c "import bs4" 2>/dev/null; then
+        echo -e "${YELLOW}•${NC} Install missing dependency: pip install beautifulsoup4"
+    fi
+    
+    # Check for port conflicts
+    if netstat -tuln 2>/dev/null | grep -q ":8888 "; then
+        if ! pgrep -f "smart_proxy" > /dev/null; then
+            echo -e "${YELLOW}•${NC} Port 8888 is in use by another process. Use: lsof -i:8888"
+        fi
+    fi
+    
+    echo ""
+}
+
+# Main execution
+case "$1" in
+    files)
+        check_files
+        ;;
+    deps)
+        check_dependencies
+        ;;
+    ports)
+        check_ports
+        ;;
+    procs)
+        check_processes
+        ;;
+    conn)
+        check_connectivity
+        ;;
+    logs)
+        check_logs
+        ;;
+    all|"")
+        check_files
+        check_dependencies
+        check_ports
+        check_processes
+        check_connectivity
+        check_logs
+        recommendations
+        ;;
+    *)
+        echo "Usage: $0 {files|deps|ports|procs|conn|logs|all}"
+        echo ""
+        echo "Options:"
+        echo "  files  - Check required files"
+        echo "  deps   - Check dependencies"
+        echo "  ports  - Check port status"
+        echo "  procs  - Check running processes"
+        echo "  conn   - Check connectivity"
+        echo "  logs   - Check logs for errors"
+        echo "  all    - Run all checks (default)"
+        ;;
+esac

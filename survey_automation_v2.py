@@ -1,11 +1,12 @@
-# Survey Automation v2 - Multi-IP Routing
 import json
 import requests
 import asyncio
-from playwright.async_api import async_playwright
+from aiohttp import web
 import logging
 from datetime import datetime
 import os
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin
 
 # Configure logging
 logging.basicConfig(
@@ -16,10 +17,8 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
-
 logger = logging.getLogger(__name__)
 
-# Load configuration
 CONFIG_FILE = "/data/data/com.termux/files/home/vpn_v2/config.json"
 
 def load_config():
@@ -31,10 +30,10 @@ CONFIG = load_config()
 class SurveyAutomation:
     def __init__(self):
         self.is_running = False
+        self.sessions = {}  # Store session cookies per account
 
-    def get_proxy_for_account(self, email: str):
+    def get_proxy_for_account(self, email):
         """Returns proxy configuration for an account"""
-        
         account = CONFIG["accounts"].get(email)
         if not account:
             raise ValueError(f"Unknown account: {email}")
@@ -43,22 +42,66 @@ class SurveyAutomation:
         proxy_url = f"http://127.0.0.1:{port}"
         
         return {
-            "server": proxy_url,
-            "username": None,
-            "password": None
+            "http": proxy_url,
+            "https": proxy_url
         }
 
-    async def check_swiss_ip(self, proxy_config):
+    def get_session(self, email):
+        """Get or create session for account"""
+        if email not in self.sessions:
+            session = requests.Session()
+            
+            # Load cookies if available
+            account = CONFIG["accounts"].get(email)
+            cookies_file = account.get("cookies_file")
+            
+            if cookies_file and os.path.exists(cookies_file):
+                try:
+                    with open(cookies_file, "r") as f:
+                        cookies_data = json.load(f)
+                        for cookie in cookies_data:
+                            session.cookies.set(
+                                cookie.get('name'),
+                                cookie.get('value'),
+                                domain=cookie.get('domain')
+                            )
+                    logger.info(f"Loaded cookies for {email}")
+                except Exception as e:
+                    logger.warning(f"Could not load cookies: {e}")
+            
+            self.sessions[email] = session
+        
+        return self.sessions[email]
+
+    def save_cookies(self, email, session):
+        """Save session cookies"""
+        account = CONFIG["accounts"].get(email)
+        cookies_file = account.get("cookies_file")
+        
+        if cookies_file:
+            try:
+                cookies_data = []
+                for cookie in session.cookies:
+                    cookies_data.append({
+                        'name': cookie.name,
+                        'value': cookie.value,
+                        'domain': cookie.domain,
+                        'path': cookie.path
+                    })
+                
+                with open(cookies_file, "w") as f:
+                    json.dump(cookies_data, f)
+                
+                logger.info(f"Saved cookies for {email}")
+            except Exception as e:
+                logger.error(f"Failed to save cookies: {e}")
+
+    def check_swiss_ip(self, proxy_config):
         """Check IP through specific proxy"""
         try:
-            proxies = {
-                "http": proxy_config["server"],
-                "https": proxy_config["server"]
-            }
-            
             resp = requests.get(
                 "https://ipapi.co/json/",
-                proxies=proxies,
+                proxies=proxy_config,
                 timeout=10
             )
             
@@ -71,16 +114,14 @@ class SurveyAutomation:
             logger.error(f"IP check failed: {e}")
             return False, {}
 
-    async def accept_survey(self, email, survey_url, reward=None):
-        """Accept survey with automatic proxy selection"""
+    def accept_survey_simple(self, email, survey_url, reward=None):
+        """Accept survey using requests library (no browser automation)"""
         
-        # Get proxy for this account
         proxy_config = self.get_proxy_for_account(email)
-        
         account = CONFIG["accounts"][email]
         
-        # Check IP through the correct proxy
-        is_swiss, ip_data = await self.check_swiss_ip(proxy_config)
+        # Check IP
+        is_swiss, ip_data = self.check_swiss_ip(proxy_config)
         
         logger.info(f"Account: {email}")
         logger.info(f"Proxy: {account['upstream']['name']}")
@@ -90,97 +131,111 @@ class SurveyAutomation:
             logger.error(f"Not in Switzerland! Location: {ip_data}")
             return {"success": False, "error": "Not in Switzerland"}
         
-        # Launch browser with the correct proxy
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=False)
+        # Get session
+        session = self.get_session(email)
+        
+        try:
+            # Set headers to mimic browser
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'de-CH,de;q=0.9,en;q=0.8',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'DNT': '1',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1'
+            }
             
-            context = await browser.new_context(
-                proxy=proxy_config,  # ← AUTO SELECTS CORRECT PROXY
-                viewport={"width": 1920, "height": 1080},
-                user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                locale="de-CH",
-                timezone_id="Europe/Zurich"
+            # Navigate to survey
+            response = session.get(
+                survey_url,
+                proxies=proxy_config,
+                headers=headers,
+                timeout=30,
+                allow_redirects=True
             )
             
-            # Add cookies if available
-            cookies_file = account.get("cookies_file")
-            if cookies_file and os.path.exists(cookies_file):
-                try:
-                    with open(cookies_file, "r") as f:
-                        cookies = json.load(f)
-                    await context.add_cookies(cookies)
-                except Exception as e:
-                    logger.warning(f"Could not load cookies: {e}")
+            if response.status_code != 200:
+                return {
+                    "success": False,
+                    "error": f"HTTP {response.status_code}"
+                }
             
-            page = await context.new_page()
+            # Parse HTML to find survey acceptance form
+            soup = BeautifulSoup(response.text, 'html.parser')
             
-            try:
-                # Navigate to survey
-                await page.goto(survey_url, wait_until="networkidle")
+            # Look for forms or buttons that might accept survey
+            forms = soup.find_all('form')
+            accept_buttons = soup.find_all(['button', 'a'], 
+                text=lambda t: t and any(word in t.lower() for word in 
+                    ['accept', 'start', 'teilnehmen', 'beantworten', 'begin']))
+            
+            logger.info(f"Found {len(forms)} forms and {len(accept_buttons)} potential accept buttons")
+            
+            # Try to submit first form if exists
+            if forms:
+                form = forms[0]
+                action = form.get('action', '')
+                method = form.get('method', 'get').lower()
                 
-                # Wait for potential login or cookie acceptance
-                await page.wait_for_timeout(2000)
+                # Build form action URL
+                if action:
+                    form_url = urljoin(response.url, action)
+                else:
+                    form_url = response.url
                 
-                # Look for survey acceptance button - FIXED: Properly quoted selectors
-                accept_selectors = [
-                    'button:has-text("Accept Survey")',
-                    'button:has-text("Start Survey")', 
-                    'button:has-text("Beantworten")',
-                    'button:has-text("Teilnehmen")',
-                    'button[type="submit"]',
-                    '.survey-start-btn',
-                    'a[href*="accept"]',
-                    'a[href*="start"]'
-                ]
+                # Collect form data
+                form_data = {}
+                for input_tag in form.find_all(['input', 'select', 'textarea']):
+                    name = input_tag.get('name')
+                    if name:
+                        value = input_tag.get('value', '')
+                        form_data[name] = value
                 
-                accepted = False
-                for selector in accept_selectors:
-                    try:
-                        # Wait a bit to ensure page is loaded
-                        await page.wait_for_timeout(1000)
-                        
-                        # Try to find and click the element
-                        element = page.locator(selector).first
-                        
-                        # Check if element is visible
-                        if await element.is_visible(timeout=3000):
-                            await element.click()
-                            logger.info(f"Clicked: {selector}")
-                            accepted = True
-                            break
-                    except Exception as e:
-                        # Element not found or not clickable, try next selector
-                        logger.debug(f"Selector {selector} failed: {e}")
-                        continue
+                logger.info(f"Submitting form to {form_url}")
                 
-                if not accepted:
-                    logger.warning("Could not find survey acceptance button")
+                # Submit form
+                if method == 'post':
+                    submit_response = session.post(
+                        form_url,
+                        data=form_data,
+                        proxies=proxy_config,
+                        headers=headers,
+                        timeout=30
+                    )
+                else:
+                    submit_response = session.get(
+                        form_url,
+                        params=form_data,
+                        proxies=proxy_config,
+                        headers=headers,
+                        timeout=30
+                    )
                 
-                # Wait and monitor for survey completion
-                await page.wait_for_timeout(5000)
-                
-                # Save cookies for next time
-                cookies = await context.cookies()
-                with open(account["cookies_file"], "w") as f:
-                    json.dump(cookies, f)
-                
-                logger.info(f"Survey session completed for {email}")
-                
-                return {"success": True, "message": f"Survey completed for {email}"}
-                
-            except Exception as e:
-                logger.error(f"Survey error for {email}: {e}")
-                return {"success": False, "error": str(e)}
-            finally:
-                await browser.close()
+                logger.info(f"Form submitted, response: {submit_response.status_code}")
+            
+            # Save cookies
+            self.save_cookies(email, session)
+            
+            return {
+                "success": True,
+                "message": f"Survey page accessed for {email}",
+                "url": response.url,
+                "forms_found": len(forms),
+                "buttons_found": len(accept_buttons)
+            }
+            
+        except requests.RequestException as e:
+            logger.error(f"Request error for {email}: {e}")
+            return {"success": False, "error": str(e)}
+        except Exception as e:
+            logger.error(f"Survey error for {email}: {e}")
+            return {"success": False, "error": str(e)}
 
     async def run(self):
         """Main service loop"""
-        logger.info("Starting Survey Automation v2...")
+        logger.info("Starting Survey Automation v2 (Simple Mode)...")
         self.is_running = True
-        
-        # Start HTTP server to receive survey requests
-        from aiohttp import web
         
         async def handle_survey_request(request):
             try:
@@ -189,14 +244,31 @@ class SurveyAutomation:
                 survey_url = data.get("url")
                 reward = data.get("reward")
                 
-                result = await self.accept_survey(email, survey_url, reward)
+                # Run in thread to avoid blocking
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(
+                    None,
+                    self.accept_survey_simple,
+                    email,
+                    survey_url,
+                    reward
+                )
+                
                 return web.json_response(result)
             except Exception as e:
                 logger.error(f"Request handling error: {e}")
                 return web.json_response({"error": str(e)}, status=500)
         
+        async def handle_status(request):
+            return web.json_response({
+                "status": "running",
+                "mode": "simple",
+                "accounts": list(CONFIG["accounts"].keys())
+            })
+        
         app = web.Application()
         app.router.add_post("/survey", handle_survey_request)
+        app.router.add_get("/status", handle_status)
         
         runner = web.AppRunner(app)
         await runner.setup()
@@ -204,6 +276,7 @@ class SurveyAutomation:
         await site.start()
         
         logger.info(f"Survey service running on port {CONFIG['survey_service_port']}")
+        logger.info("Mode: Simple (no browser automation)")
         
         # Keep running
         while self.is_running:
@@ -213,5 +286,5 @@ def main():
     automation = SurveyAutomation()
     asyncio.run(automation.run())
 
-if __name__ == "__main__": 
+if __name__ == "__main__":
     main()
