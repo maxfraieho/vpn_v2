@@ -6,12 +6,17 @@ git clone git@github.com:maxfraieho/vpn_v2.git
 cd vpn_v2
 ```
 
+## Оновлення з віддаленого репозиторію:
+```bash
+git pull origin master
+```
+
 ## Інструкції з розгортання:
 ```bash
 # Оновити пакети
 pkg update && pkg upgrade -y
 
-# Встановити необхідні пакети
+# Встановити необхідні пакети якщо не встановлені
 pkg install -y tor python curl jq
 
 # Встановити Python бібліотеки
