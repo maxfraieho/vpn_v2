@@ -26,6 +26,15 @@ The system includes various components for handling network routing, proxy servi
 - `survey_automation_v2.py` - Automation script
 - `run_md_service.sh` - Service runner
 - `test_routing.sh` - Routing test script
+- `diagnostic.sh` - System diagnostics
+
+## Special Notes for Termux/Android Users
+
+If you're running this system on Termux/Android:
+
+1. Some diagnostic tools may not work properly due to platform limitations
+2. See `TERMUX_README.md` for specific instructions and known issues
+3. Network connectivity testing should be done externally rather than relying on internal diagnostics
 
 ## Notes
 

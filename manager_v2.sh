@@ -15,19 +15,50 @@ check_process() {
     local pid_file="$1"
     local name="$2"
     
+    # First check PID file if it exists
     if [ -f "$pid_file" ]; then
-        local pid=$(cat "$pid_file")
-        if ps -p "$pid" > /dev/null 2>&1; then
+        local pid=$(cat "$pid_file" 2>/dev/null)
+        if [ ! -z "$pid" ] && ps -p "$pid" > /dev/null 2>&1; then
             echo -e "${GREEN}✓${NC} $name running (PID $pid)"
             return 0
         else
-            echo -e "${RED}✗${NC} $name not running (stale PID file)"
-            rm -f "$pid_file"
-            return 1
+            # PID file exists but process not running, check if process exists anyway
+            local process_name_check=""
+            if [ "$name" = "Tor" ]; then
+                process_name_check=$(pgrep -f "tor -f" 2>/dev/null)
+            elif [ "$name" = "Smart proxy" ]; then
+                process_name_check=$(pgrep -f "smart_proxy" 2>/dev/null)
+            elif [ "$name" = "Survey automation" ]; then
+                process_name_check=$(pgrep -f "survey_automation" 2>/dev/null)
+            fi
+            
+            if [ ! -z "$process_name_check" ]; then
+                echo -e "${GREEN}✓${NC} $name running (PID $process_name_check) [PID file may be stale]"
+                return 0
+            else
+                echo -e "${RED}✗${NC} $name not running (stale PID file)"
+                rm -f "$pid_file"
+                return 1
+            fi
         fi
     else
-        echo -e "${RED}✗${NC} $name not running"
-        return 1
+        # No PID file, search for process directly
+        local process_name_check=""
+        if [ "$name" = "Tor" ]; then
+            process_name_check=$(pgrep -f "tor -f" 2>/dev/null)
+        elif [ "$name" = "Smart proxy" ]; then
+            process_name_check=$(pgrep -f "smart_proxy" 2>/dev/null)
+        elif [ "$name" = "Survey automation" ]; then
+            process_name_check=$(pgrep -f "survey_automation" 2>/dev/null)
+        fi
+        
+        if [ ! -z "$process_name_check" ]; then
+            echo -e "${GREEN}✓${NC} $name running (PID $process_name_check)"
+            return 0
+        else
+            echo -e "${RED}✗${NC} $name not running"
+            return 1
+        fi
     fi
 }
 
@@ -105,8 +136,10 @@ start_all() {
     echo ""
     echo "Starting Smart Proxy v2..."
     
-    # Use fixed version if exists, otherwise use original
-    if [ -f "$SETUP_DIR/smart_proxy_v2_fixed.py" ]; then
+    # Use stream-based proxy first, then fixed version, then original
+    if [ -f "$SETUP_DIR/swiss_proxy_stream.py" ]; then
+        proxy_script="swiss_proxy_stream.py"
+    elif [ -f "$SETUP_DIR/smart_proxy_v2_fixed.py" ]; then
         proxy_script="smart_proxy_v2_fixed.py"
     else
         proxy_script="smart_proxy_v2.py"
@@ -189,7 +222,11 @@ status() {
     if [ $? -eq 0 ]; then
         echo "   Checking ports..."
         for port in 8888 8889; do
+            # Check with netstat first (for compatibility)
             if netstat -tuln 2>/dev/null | grep -q ":$port "; then
+                echo -e "   Port $port: ${GREEN}listening${NC}"
+            # Try alternative method for Termux
+            elif ss -tuln 2>/dev/null | grep -q ":$port " || grep -q ":$port " <(ss -tuln 2>/dev/null || netstat -tuln 2>/dev/null); then
                 echo -e "   Port $port: ${GREEN}listening${NC}"
             else
                 echo -e "   Port $port: ${YELLOW}not listening${NC}"
@@ -204,7 +241,11 @@ status() {
     if [ $? -eq 0 ]; then
         local port=$(grep -o '"survey_service_port": [0-9]*' "$SETUP_DIR/config.json" | grep -o '[0-9]*')
         if [ ! -z "$port" ]; then
+            # Check with netstat first (for compatibility)
             if netstat -tuln 2>/dev/null | grep -q ":$port "; then
+                echo -e "   Port $port: ${GREEN}listening${NC}"
+            # Try alternative method for Termux
+            elif ss -tuln 2>/dev/null | grep -q ":$port " || grep -q ":$port " <(ss -tuln 2>/dev/null || netstat -tuln 2>/dev/null); then
                 echo -e "   Port $port: ${GREEN}listening${NC}"
             fi
         fi

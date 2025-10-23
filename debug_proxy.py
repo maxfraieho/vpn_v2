@@ -6,6 +6,7 @@ import aiohttp_socks
 import logging
 import socket
 from contextlib import closing
+import ssl
 
 # Setup logging
 logging.basicConfig(
@@ -67,35 +68,60 @@ class SwissProxy:
     async def handle_connect(self, request, account_config):
         """Handle HTTPS CONNECT method"""
         try:
-            # Extract target host and port
-            target = request.path_qs
-            if ':' not in target:
-                return web.Response(status=400, text="Bad Request")
+            # Debug: log the full request info to understand the issue
+            logger.info(f"CONNECT request received: path_qs={request.path_qs}, method={request.method}")
+            logger.info(f"Headers: {dict(request.headers)}")
+            logger.info(f"Match info: {request.match_info}")
             
-            host, port = target.split(':')
+            # For CONNECT requests in aiohttp, the target (host:port) should be in the path_qs
+            # e.g. "CONNECT httpbin.org:443 HTTP/1.1" -> request.path_qs = "httpbin.org:443"
+            target = request.path_qs
+            
+            # If path_qs doesn't contain the target, try to extract from the Host header
+            if not target:
+                host_header = request.headers.get('Host', '')
+                logger.info(f"No path_qs, trying Host header: {host_header}")
+                if host_header:
+                    target = host_header
+                else:
+                    return web.Response(status=400, text="Bad Request: No target specified")
+            
+            if ':' not in target:
+                return web.Response(status=400, text="Bad Request: Port not specified")
+            
+            # Extract host and port from the CONNECT request target
+            host, port = target.split(':', 1)  # Split only on first colon to handle IPv6 if needed
             port = int(port)
+            
+            logger.info(f"Connecting to {host}:{port} for upstream {account_config['upstream']['type']}")
             
             # Create connector based on account config
             upstream = account_config["upstream"]
             if upstream["type"] == "tor":
                 # For Tor, we create a direct connection to the target through Tor SOCKS proxy
-                reader, writer = await asyncio.open_connection(
-                    upstream['socks_host'], 
-                    upstream['socks_port']
-                )
+                try:
+                    reader, writer = await asyncio.open_connection(
+                        upstream['socks_host'], 
+                        upstream['socks_port']
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to connect to Tor SOCKS proxy: {e}")
+                    return web.Response(status=502, text=f"Failed to connect to Tor: {str(e)}")
                 
-                # Send request to Tor SOCKS proxy to establish tunnel to target
-                # SOCKS5 protocol request
-                socks_request = bytearray([0x05, 0x01, 0x00])  # Version 5, 1 auth method, no auth
-                writer.write(socks_request)
+                # Send SOCKS5 protocol request to establish tunnel to target
+                # SOCKS5 version identifier
+                writer.write(bytearray([0x05, 0x01, 0x00]))  # Version 5, 1 auth method, no auth
                 await writer.drain()
                 
-                # Read response from SOCKS proxy
+                # Read authentication response from SOCKS proxy
                 auth_response = await reader.read(2)
-                if auth_response[0] != 0x05:  # SOCKS5 version
-                    raise Exception("SOCKS authentication failed")
+                if len(auth_response) < 2 or auth_response[0] != 0x05:  # SOCKS5 version
+                    logger.error(f"SOCKS authentication failed: {auth_response}")
+                    writer.close()
+                    await writer.wait_closed()
+                    return web.Response(status=502, text="SOCKS authentication failed")
                 
-                # Now send CONNECT request to target host
+                # Send CONNECT request to target host
                 addr_type = 0x03  # Domain name
                 host_bytes = host.encode('ascii')
                 request_data = bytearray([0x05, 0x01, 0x00, addr_type])  # CONNECT request
@@ -107,9 +133,12 @@ class SwissProxy:
                 await writer.drain()
                 
                 # Read response from SOCKS proxy
-                connect_response = await reader.read(10)  # SOCKS5 response
-                if connect_response[0] != 0x05 or connect_response[1] != 0x00:  # Version, success
-                    raise Exception(f"SOCKS connection failed: {connect_response[1]}")
+                connect_response = await reader.read(10)  # SOCKS5 connection response
+                if len(connect_response) < 2 or connect_response[0] != 0x05 or connect_response[1] != 0x00:  # Version, success
+                    logger.error(f"SOCKS connection failed: response was {connect_response}")
+                    writer.close()
+                    await writer.wait_closed()
+                    return web.Response(status=502, text=f"SOCKS connection failed: {connect_response[1] if len(connect_response) > 1 else 'unknown'}")
                 
                 # Send success response to client
                 response = (
@@ -119,52 +148,56 @@ class SwissProxy:
                 )
                 request.transport.write(response)
                 
-                # Bridge connections
-                async def forward_client_to_server(reader, writer, description="client->server"):
+                # Bridge connections with proper error handling
+                async def forward_client_to_server(client_reader, server_writer, description="client->server"):
                     try:
                         while True:
-                            data = await reader.read(4096)
+                            data = await client_reader.read(4096)
                             if not data:
                                 break
-                            writer.write(data)
-                            await writer.drain()
+                            server_writer.write(data)
+                            await server_writer.drain()
                     except Exception as e:
                         logger.debug(f"Forward {description} ended: {e}")
                     finally:
                         try:
-                            writer.close()
-                            await writer.wait_closed()
+                            server_writer.close()
+                            await server_writer.wait_closed()
                         except:
                             pass
                 
-                async def forward_server_to_client(reader, writer, description="server->client"):
+                async def forward_server_to_client(server_reader, client_transport, description="server->client"):
                     try:
                         while True:
-                            data = await reader.read(4096)
+                            data = await server_reader.read(4096)
                             if not data:
                                 break
-                            writer.write(data)
-                            await writer.drain()
+                            client_transport.write(data)
+                            await client_transport.drain()
                     except Exception as e:
                         logger.debug(f"Forward {description} ended: {e}")
                     finally:
                         try:
-                            writer.close()
-                            await writer.wait_closed()
+                            if not client_transport.is_closing():
+                                client_transport.close()
                         except:
                             pass
                 
                 # Forward data in both directions
-                await asyncio.gather(
-                    forward_client_to_server(request.content, writer, "client->tor"),
-                    forward_server_to_client(reader, request.transport, "tor->client")
-                )
+                try:
+                    await asyncio.gather(
+                        forward_client_to_server(request.content, writer, "client->tor"),
+                        forward_server_to_client(reader, request.transport, "tor->client")
+                    )
+                except Exception as e:
+                    logger.error(f"Connection forwarding failed: {e}")
                 
                 return request  # Return the request to indicate we've handled it
             else:
                 # For direct connections, create a direct socket connection
                 try:
                     reader, writer = await asyncio.open_connection(host, port)
+                    logger.info(f"Successfully connected to {host}:{port}")
                 except Exception as e:
                     logger.error(f"Failed to connect to target {host}:{port} - {e}")
                     return web.Response(status=502, text=f"Failed to connect to target: {str(e)}")
@@ -178,37 +211,37 @@ class SwissProxy:
                 request.transport.write(response)
                 
                 # Bridge connections with proper error handling
-                async def forward_client_to_server(reader, writer, description="client->server"):
+                async def forward_client_to_server(client_reader, server_writer, description="client->server"):
                     try:
                         while True:
-                            data = await reader.read(4096)
+                            data = await client_reader.read(4096)
                             if not data:
                                 break
-                            writer.write(data)
-                            await writer.drain()
+                            server_writer.write(data)
+                            await server_writer.drain()
                     except Exception as e:
                         logger.debug(f"Forward {description} ended: {e}")
                     finally:
                         try:
-                            writer.close()
-                            await writer.wait_closed()
+                            server_writer.close()
+                            await server_writer.wait_closed()
                         except:
                             pass
                 
-                async def forward_server_to_client(reader, writer, description="server->client"):
+                async def forward_server_to_client(server_reader, client_transport, description="server->client"):
                     try:
                         while True:
-                            data = await reader.read(4096)
+                            data = await server_reader.read(4096)
                             if not data:
                                 break
-                            writer.write(data)
-                            await writer.drain()
+                            client_transport.write(data)
+                            await client_transport.drain()
                     except Exception as e:
                         logger.debug(f"Forward {description} ended: {e}")
                     finally:
                         try:
-                            writer.close()
-                            await writer.wait_closed()
+                            if not client_transport.is_closing():
+                                client_transport.close()
                         except:
                             pass
                 
@@ -222,13 +255,18 @@ class SwissProxy:
                     logger.error(f"Connection forwarding failed: {e}")
                 
                 return request  # Return the request to indicate we've handled it
-                
+
+        except ValueError as e:
+            logger.error(f"Value conversion error in CONNECT: {e}")
+            return web.Response(status=400, text=f"Bad Request: {str(e)}")
         except Exception as e:
             logger.error(f"CONNECT failed: {e}")
             return web.Response(status=502, text=f"Bad Gateway: {str(e)}")
 
     async def handle_http_with_routing(self, request, account_config):
         """HTTP proxy with routing through upstream"""
+        
+        logger.info(f"HTTP request received: {request.method} {request.path_qs}")
         
         # Handle CONNECT method for HTTPS tunneling
         if request.method == "CONNECT":
@@ -244,7 +282,7 @@ class SwissProxy:
         else:
             connector = None
 
-        # Get target URL
+        # Get target URL for regular HTTP requests
         if request.path_qs.startswith("http"):
             full_url = request.path_qs
         else:
@@ -260,16 +298,30 @@ class SwissProxy:
 
         try:
             timeout = aiohttp.ClientTimeout(total=30)
+            
+            # Use ssl context for HTTPS requests
+            ssl_context = None
+            if full_url.startswith('https'):
+                ssl_context = ssl.create_default_context()
+            
             async with ClientSession(connector=connector, timeout=timeout) as session:
                 method = request.method.lower()
                 
                 if method in ["get", "head", "options"]:
-                    async with getattr(session, method)(full_url, headers=headers) as resp:
-                        body = await resp.read()
+                    if full_url.startswith('https'):
+                        async with getattr(session, method)(full_url, headers=headers, ssl=ssl_context) as resp:
+                            body = await resp.read()
+                    else:
+                        async with getattr(session, method)(full_url, headers=headers) as resp:
+                            body = await resp.read()
                 elif method in ["post", "put", "delete", "patch"]:
                     data = await request.read()
-                    async with getattr(session, method)(full_url, headers=headers, data=data) as resp:
-                        body = await resp.read()
+                    if full_url.startswith('https'):
+                        async with getattr(session, method)(full_url, headers=headers, data=data, ssl=ssl_context) as resp:
+                            body = await resp.read()
+                    else:
+                        async with getattr(session, method)(full_url, headers=headers, data=data) as resp:
+                            body = await resp.read()
                 else:
                     return web.Response(status=501, text=f"Method {method} not implemented")
 

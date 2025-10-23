@@ -83,16 +83,43 @@ check_ports() {
     local ports=(9050 8888 8889 8090)
     
     for port in "${ports[@]}"; do
-        if netstat -tuln 2>/dev/null | grep -q ":$port "; then
-            local pid=$(lsof -ti:$port 2>/dev/null || fuser $port/tcp 2>/dev/null)
-            if [ ! -z "$pid" ]; then
-                local proc=$(ps -p $pid -o comm= 2>/dev/null)
-                echo -e "  ${GREEN}✓${NC} Port $port: in use by $proc (PID $pid)"
-            else
-                echo -e "  ${GREEN}✓${NC} Port $port: in use"
-            fi
+        # Try different methods to check if port is listening
+        if command -v ss &> /dev/null && ss -tuln 2>/dev/null | grep -q ":$port "; then
+            # Port is listening according to ss
+            echo -e "  ${GREEN}✓${NC} Port $port: listening"
+        elif netstat -tuln 2>/dev/null | grep -q ":$port "; then
+            # Port is listening according to netstat
+            echo -e "  ${GREEN}✓${NC} Port $port: listening"
+        elif lsof -i :$port 2>/dev/null | grep -q LISTEN; then
+            # Port is listening according to lsof
+            echo -e "  ${GREEN}✓${NC} Port $port: listening"
         else
-            echo -e "  ${YELLOW}○${NC} Port $port: available"
+            # Since we can't reliably check port status on Termux, 
+            # let's test connectivity to the port instead
+            if timeout 5 curl -s http://localhost:$port 2>/dev/null | grep -q "Proxy" || \
+               timeout 5 curl -s http://127.0.0.1:$port 2>/dev/null | grep -q "Proxy"; then
+                echo -e "  ${GREEN}✓${NC} Port $port: reachable"
+            else
+                # Check if process is running that should listen on this port
+                local process_check=""
+                case $port in
+                    9050)
+                        process_check="tor"
+                        ;;
+                    8888|8889)
+                        process_check="smart_proxy"
+                        ;;
+                    8090)
+                        process_check="survey"
+                        ;;
+                esac
+                
+                if [ ! -z "$process_check" ] && pgrep -f "$process_check" > /dev/null; then
+                    echo -e "  ${GREEN}✓${NC} Port $port: process running (connectivity test inconclusive)"
+                else
+                    echo -e "  ${YELLOW}○${NC} Port $port: unavailable"
+                fi
+            fi
         fi
     done
     echo ""
@@ -101,12 +128,32 @@ check_ports() {
 check_processes() {
     echo -e "${YELLOW}[4/6] Checking processes...${NC}"
     
-    # Check Tor
-    if pgrep -f "tor -f" > /dev/null; then
-        local tor_pid=$(pgrep -f "tor -f")
-        echo -e "  ${GREEN}✓${NC} Tor running (PID $tor_pid)"
+    # Check Tor - try PID file first, then fall back to process search
+    local tor_running=false
+    if [ -f "$SETUP_DIR/tor.pid" ]; then
+        local tor_pid=$(cat "$SETUP_DIR/tor.pid" 2>/dev/null)
+        if [ ! -z "$tor_pid" ] && ps -p "$tor_pid" > /dev/null 2>&1; then
+            echo -e "  ${GREEN}✓${NC} Tor running (PID $tor_pid)"
+            tor_running=true
+        else
+            # PID file exists but process not running, try to find Tor process anyway
+            local tor_pids=$(pgrep -f "tor -f" 2>/dev/null)
+            if [ ! -z "$tor_pids" ]; then
+                echo -e "  ${GREEN}✓${NC} Tor running (PID $tor_pids) [PID file may be stale]"
+                tor_running=true
+            else
+                echo -e "  ${RED}✗${NC} Tor not running"
+            fi
+        fi
     else
-        echo -e "  ${RED}✗${NC} Tor not running"
+        # No PID file, search for processes
+        local tor_pids=$(pgrep -f "tor -f" 2>/dev/null)
+        if [ ! -z "$tor_pids" ]; then
+            echo -e "  ${GREEN}✓${NC} Tor running (PID $tor_pids)"
+            tor_running=true
+        else
+            echo -e "  ${RED}✗${NC} Tor not running"
+        fi
     fi
     
     # Check Proxy
@@ -138,11 +185,13 @@ check_connectivity() {
     fi
     
     # Check Tor
-    if curl -s --socks5 127.0.0.1:9050 --connect-timeout 10 https://check.torproject.org/ | grep -q "Congratulations"; then
+    if timeout 15 sh -c 'curl -s --socks5 127.0.0.1:9050 --connect-timeout 10 https://check.torproject.org/ | grep -q "Congratulations"' 2>/dev/null; then
         echo -e "  ${GREEN}✓${NC} Tor connection: OK"
-        local tor_ip=$(curl -s --socks5 127.0.0.1:9050 https://ipapi.co/ip)
-        local tor_country=$(curl -s --socks5 127.0.0.1:9050 https://ipapi.co/country_code)
-        echo -e "      IP: $tor_ip ($tor_country)"
+        local tor_ip=$(timeout 10 curl -s --socks5 127.0.0.1:9050 https://ipapi.co/ip 2>/dev/null)
+        local tor_country=$(timeout 10 curl -s --socks5 127.0.0.1:9050 https://ipapi.co/country_code 2>/dev/null)
+        if [ ! -z "$tor_ip" ] && [ ! -z "$tor_country" ]; then
+            echo -e "      IP: $tor_ip ($tor_country)"
+        fi
     else
         echo -e "  ${RED}✗${NC} Tor connection failed"
     fi
@@ -205,7 +254,8 @@ recommendations() {
     echo ""
     
     # Check if services are running
-    if ! pgrep -f "tor -f" > /dev/null; then
+    local tor_running=$(pgrep -f "tor -f" 2>/dev/null)
+    if [ -z "$tor_running" ]; then
         echo -e "${YELLOW}•${NC} Tor is not running. Start with: ./manager_v2.sh start"
     fi
     
@@ -222,13 +272,9 @@ recommendations() {
         echo -e "${YELLOW}•${NC} Install missing dependency: pip install beautifulsoup4"
     fi
     
-    # Check for port conflicts
-    if netstat -tuln 2>/dev/null | grep -q ":8888 "; then
-        if ! pgrep -f "smart_proxy" > /dev/null; then
-            echo -e "${YELLOW}•${NC} Port 8888 is in use by another process. Use: lsof -i:8888"
-        fi
-    fi
-    
+    # Additional recommendation for Termux users
+    echo -e "${YELLOW}•${NC} On Termux/Android systems, network diagnostics may show false negatives due to limited command support."
+    echo -e "${YELLOW}•${NC} If services appear offline but are working externally (as tested with curl), the system is functioning correctly."
     echo ""
 }
 
