@@ -1,0 +1,28 @@
+[Unit]
+Description=Tailscale Proxy Watchdog
+After=network.target tailscaled.service
+Wants=tailscaled.service
+
+[Service]
+Type=oneshot
+User=YOUR_USERNAME
+Group=YOUR_USERNAME
+WorkingDirectory=/opt/watchdog
+ExecStart=/opt/watchdog/watchdog.sh
+StandardOutput=append:/opt/watchdog/logs/systemd.log
+StandardError=append:/opt/watchdog/logs/systemd-error.log
+
+# Обмеження ресурсів
+MemoryLimit=256M
+CPUQuota=50%
+
+# Таймаути
+TimeoutStartSec=60
+TimeoutStopSec=30
+
+# Перезапуск при помилках
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
