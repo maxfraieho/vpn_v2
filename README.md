@@ -1,43 +1,46 @@
-# VPN and Proxy Management System
+# VPN v2 - Swiss Proxy System
 
-This repository contains a collection of scripts and configurations for managing VPN and proxy services.
+Proxy system that routes traffic through Swiss IP addresses for accessing Swiss survey platforms. Runs on Android (Termux), accessed from Windows via Tailscale VPN.
 
-## Overview
+## Quick Start
 
-The system includes various components for handling network routing, proxy services, and connection management through different protocols and technologies.
+### Termux (Android server)
+
+```bash
+cd ~/vpn_v2
+./manager_v2.sh start    # Start Tor + HTTP proxy + SOCKS5 proxy
+./manager_v2.sh status   # Check status
+./manager_v2.sh test     # Test IP routing
+```
+
+### Windows (client)
+
+Double-click the appropriate .bat file to launch Comet Browser with Swiss proxy:
+
+- `start_comet_arsen.bat` — Swiss IP via Tailscale (port 9888)
+- `start_comet_lekov.bat` — Swiss IP via Tor (port 9889)
+- `start_comet_tukroschu.bat` — Swiss IP via Tor (port 9890)
 
 ## Components
 
-- Shell scripts for management and automation
-- Python scripts for service control and routing
-- Configuration files for various services
-- Documentation files
+| File | Purpose |
+|------|---------|
+| `swiss_proxy_stream.py` | HTTP/HTTPS proxy (ports 8888-8890) |
+| `swiss_socks5_proxy.py` | SOCKS5 proxy (ports 9888-9890) |
+| `manager_v2.sh` | Service manager (start/stop/restart/status/test) |
+| `config.json` | Account & routing configuration |
+| `torrc` | Tor config (Swiss exit nodes) |
+| `start_comet_*.bat` | Windows browser launchers with anti-leak protection |
 
-## Setup
+## Documentation
 
-1. Clone the repository
-2. Review and modify configuration files as needed
-3. Run the appropriate management scripts based on your requirements
+- **[SWISS_PROXY_README.md](SWISS_PROXY_README.md)** — Full deployment & usage guide
+- **[TERMUX_README.md](TERMUX_README.md)** — Termux-specific notes
 
-## Scripts
+## Anti-leak Protection
 
-- `manager_v2.sh` - Main management script
-- `smart_proxy_v2.py` - Python-based proxy management
-- `survey_automation_v2.py` - Automation script
-- `run_md_service.sh` - Service runner
-- `test_routing.sh` - Routing test script
-- `diagnostic.sh` - System diagnostics
-
-## Special Notes for Termux/Android Users
-
-If you're running this system on Termux/Android:
-
-1. Some diagnostic tools may not work properly due to platform limitations
-2. See `TERMUX_README.md` for specific instructions and known issues
-3. Network connectivity testing should be done externally rather than relying on internal diagnostics
-
-## Notes
-
-- Configuration files may contain sensitive information - review .gitignore before deployment
-- Some components may require specific dependencies
-- Review all configuration files before use in production environments
+Swiss .bat files include flags to prevent geolocation detection:
+- DNS resolution through proxy (no DNS leak)
+- WebRTC disabled (no IP leak)
+- Swiss German language (`de-CH`)
+- Swiss timezone (`Europe/Zurich`)
