@@ -112,18 +112,22 @@ This starts:
 The Swiss .bat files include protection against geolocation detection:
 
 ```batch
---host-resolver-rules="MAP * ~NOTFOUND , EXCLUDE 127.0.0.1"
---force-webrtc-ip-handling-policy=disable_non_proxied_udp
---lang=de-CH
 set TZ=Europe/Zurich
+--webrtc-ip-handling-policy=disable_non_proxied_udp
+--enforce-webrtc-ip-permission-check
+--disable-features=WebRtcHideLocalIpsWithMdns
+--lang=de-CH
 ```
 
 | Protection | Flag | What it prevents |
 |------------|------|-----------------|
-| DNS leak | `--host-resolver-rules` | DNS queries going to real ISP |
-| WebRTC leak | `--force-webrtc-ip-handling-policy` | Real IP exposed via WebRTC |
+| WebRTC leak | `--webrtc-ip-handling-policy=disable_non_proxied_udp` | Real IP exposed via WebRTC |
+| WebRTC leak | `--enforce-webrtc-ip-permission-check` | WebRTC bypassing proxy |
+| WebRTC leak | `--disable-features=WebRtcHideLocalIpsWithMdns` | mDNS fallback leak |
 | Language leak | `--lang=de-CH` | Non-Swiss browser language |
 | Timezone leak | `set TZ=Europe/Zurich` | Non-Swiss timezone in JS |
+
+**Note:** `--host-resolver-rules` was removed — it breaks internet connectivity. Chromium with `socks5://` already resolves DNS through the proxy.
 
 ### Usage
 

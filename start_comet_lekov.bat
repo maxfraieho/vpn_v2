@@ -31,8 +31,9 @@ echo.
 
 "C:\Users\tukro\AppData\Local\Perplexity\Comet\Application\comet.exe" ^
   --proxy-server="socks5://%PROXY_IP%:%PROXY_PORT%" ^
-  --host-resolver-rules="MAP * ~NOTFOUND , EXCLUDE 127.0.0.1" ^
-  --force-webrtc-ip-handling-policy=disable_non_proxied_udp ^
+  --webrtc-ip-handling-policy=disable_non_proxied_udp ^
+  --enforce-webrtc-ip-permission-check ^
+  --disable-features=WebRtcHideLocalIpsWithMdns ^
   --lang=de-CH ^
   --user-data-dir="%LOCALAPPDATA%\Perplexity\Comet\User Data" ^
   --profile-directory="Profile-Lekov"
