@@ -29,7 +29,7 @@ echo.
 echo ========================================================
 echo.
 
-"C:\Users\tukro\AppData\Local\Perplexity\Comet\Application\comet.exe" ^
+"C:\Users\vokov\AppData\Local\Perplexity\Comet\Application\comet.exe" ^
   --proxy-server="socks5://%PROXY_IP%:%PROXY_PORT%" ^
   --webrtc-ip-handling-policy=disable_non_proxied_udp ^
   --enforce-webrtc-ip-permission-check ^
