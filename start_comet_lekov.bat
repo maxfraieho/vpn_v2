@@ -1,13 +1,13 @@
 @echo off
 REM ========================================================
 REM  Swiss Proxy - Comet Browser (ANTI-LEAK)
-REM  Account: tukroschu@gmail.com
-REM  Port: 9890 (SOCKS5)
+REM  Account: lekov00@gmail.com
+REM  Port: 9889 (SOCKS5)
 REM  IP: Swiss via Tor (changes)
 REM ========================================================
 
 set PROXY_IP=100.100.74.9
-set PROXY_PORT=9890
+set PROXY_PORT=9889
 
 REM Set Swiss timezone to prevent timezone leak
 set TZ=Europe/Zurich
@@ -17,7 +17,7 @@ echo ========================================================
 echo   Comet Browser via Swiss Proxy [PROTECTED]
 echo ========================================================
 echo.
-echo   Account: tukroschu@gmail.com
+echo   Account: lekov00@gmail.com
 echo   Type:    Tor (Swiss IP, Anonymous)
 echo   Proxy:   socks5://%PROXY_IP%:%PROXY_PORT%
 echo   IP:      Changes via Tor
@@ -35,4 +35,4 @@ echo.
   --force-webrtc-ip-handling-policy=disable_non_proxied_udp ^
   --lang=de-CH ^
   --user-data-dir="%LOCALAPPDATA%\Perplexity\Comet\User Data" ^
-  --profile-directory="Profile-Tukroschu"
+  --profile-directory="Profile-Lekov"

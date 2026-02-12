@@ -26,6 +26,7 @@ def check_port_available(port):
     """Check if port is available"""
     with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
         try:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             sock.bind(('0.0.0.0', port))
             return True
         except OSError:
@@ -132,7 +133,7 @@ class SwissSOCKS5Proxy:
 
                 # We only support CONNECT command (0x01)
                 if cmd == 0x01:  # CONNECT
-                    await self.handle_connect(reader, writer, dst_addr, dst_port, account_config, port)
+                    await self.handle_connect(reader, writer, dst_addr, dst_port, atyp, account_config, port)
                 else:
                     logger.error(f"[Port {port}] Unsupported command: {cmd}")
                     # Send command not supported error
@@ -150,7 +151,7 @@ class SwissSOCKS5Proxy:
 
         return handle_client
 
-    async def handle_connect(self, client_reader, client_writer, dst_addr, dst_port, account_config, listen_port):
+    async def handle_connect(self, client_reader, client_writer, dst_addr, dst_port, atyp, account_config, listen_port):
         """Handle SOCKS5 CONNECT command"""
         try:
             upstream = account_config["upstream"]
@@ -183,25 +184,67 @@ class SwissSOCKS5Proxy:
                     await target_writer.wait_closed()
                     return
 
-                # Send CONNECT request to Tor
-                request_data = bytearray([0x05, 0x01, 0x00, 0x03])  # CONNECT, domain name
-                host_bytes = dst_addr.encode('ascii')
-                request_data.append(len(host_bytes))
-                request_data.extend(host_bytes)
+                # Build CONNECT request preserving the original address type
+                # Tor supports: 0x01 (IPv4), 0x03 (domain), 0x04 (IPv6)
+                # However, for IP addresses (IPv4/IPv6), convert to domain name
+                # so Tor re-resolves through its own DNS (prevents DNS leak)
+                request_data = bytearray([0x05, 0x01, 0x00])
+
+                if atyp == 0x03:
+                    # Domain name - pass through as-is
+                    request_data.append(0x03)
+                    host_bytes = dst_addr.encode('ascii')
+                    request_data.append(len(host_bytes))
+                    request_data.extend(host_bytes)
+                elif atyp == 0x01:
+                    # IPv4 - send as IPv4 type to Tor
+                    request_data.append(0x01)
+                    request_data.extend(socket.inet_pton(socket.AF_INET, dst_addr))
+                elif atyp == 0x04:
+                    # IPv6 - send as IPv6 type to Tor
+                    request_data.append(0x04)
+                    request_data.extend(socket.inet_pton(socket.AF_INET6, dst_addr))
+                else:
+                    logger.error(f"[Port {listen_port}] Unknown address type {atyp}")
+                    client_writer.write(bytes([0x05, 0x08, 0x00, 0x01]) + bytes(6))
+                    await client_writer.drain()
+                    target_writer.close()
+                    await target_writer.wait_closed()
+                    return
+
                 request_data.extend(struct.pack('!H', dst_port))
 
                 target_writer.write(request_data)
                 await target_writer.drain()
 
                 # Read connection response from Tor
-                connect_response = await target_reader.read(10)
-                if len(connect_response) < 2 or connect_response[0] != 0x05 or connect_response[1] != 0x00:
-                    logger.error(f"[Port {listen_port}] Tor SOCKS connection failed")
+                # Response: VER(1) REP(1) RSV(1) ATYP(1) + addr + port
+                connect_response = await target_reader.read(4)
+                if len(connect_response) < 4 or connect_response[0] != 0x05 or connect_response[1] != 0x00:
+                    error_code = connect_response[1] if len(connect_response) >= 2 else 'N/A'
+                    logger.error(f"[Port {listen_port}] Tor SOCKS connection failed (code={error_code}) for {dst_addr}:{dst_port} atyp={atyp}")
+                    # Consume remaining response bytes
+                    try:
+                        await asyncio.wait_for(target_reader.read(256), timeout=1.0)
+                    except:
+                        pass
                     client_writer.write(bytes([0x05, 0x05, 0x00, 0x01]) + bytes(6))
                     await client_writer.drain()
                     target_writer.close()
                     await target_writer.wait_closed()
                     return
+
+                # Consume the rest of the Tor response (bind addr + port)
+                resp_atyp = connect_response[3]
+                if resp_atyp == 0x01:
+                    await target_reader.read(4 + 2)  # IPv4 + port
+                elif resp_atyp == 0x03:
+                    addr_len = (await target_reader.read(1))[0]
+                    await target_reader.read(addr_len + 2)
+                elif resp_atyp == 0x04:
+                    await target_reader.read(16 + 2)  # IPv6 + port
+                else:
+                    await target_reader.read(6)  # fallback
 
                 logger.info(f"[Port {listen_port}] Connected to {dst_addr}:{dst_port} via Tor")
 
@@ -283,7 +326,8 @@ class SwissSOCKS5Proxy:
         server = await asyncio.start_server(
             handler,
             '0.0.0.0',
-            port
+            port,
+            reuse_address=True
         )
 
         logger.info(f"✅ SOCKS5 Proxy started for {account['email']}")
