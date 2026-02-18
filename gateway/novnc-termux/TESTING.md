@@ -58,7 +58,7 @@ PING 100.100.74.9: 64 bytes from 100.100.74.9: icmp_seq=1 ttl=64 time=X ms
 
 ```bash
 termux-wake-lock
-cd ~/gateway/novnc-termux
+cd ~/vpn_v2/gateway/novnc-termux
 bash scripts/install_termux.sh
 ```
 
@@ -111,11 +111,19 @@ Would you like to enter a view-only password (y/n)? n
 ## Step 4 — Configure environment
 
 ```bash
-cd ~/gateway/novnc-termux
+cd ~/vpn_v2/gateway/novnc-termux
 cp .env.example .env
 ```
 
-Edit `.env` — the defaults should work. Verify `VNC_SECURITY=VncAuth`.
+Edit `.env`:
+```bash
+# Set your Tailscale IP (find with: tailscale ip -4)
+# If Tailscale is running, WEBSOCKIFY_BIND auto-detects. Otherwise set it:
+WEBSOCKIFY_BIND=100.100.74.9
+VNC_SECURITY=VncAuth
+```
+
+Verify `VNC_SECURITY=VncAuth` (default, requires password).
 
 ---
 

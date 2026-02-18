@@ -13,8 +13,12 @@ Web-based remote desktop access to isolated browser workspaces running on a Swis
 ```bash
 # On the Swiss tablet, in Termux:
 cd ~
-git clone <your-repo-url> gateway
-cd gateway/novnc-termux
+git clone https://github.com/maxfraieho/vpn_v2.git
+cd vpn_v2/gateway/novnc-termux
+
+# Configure environment
+cp .env.example .env
+# Edit .env: set WEBSOCKIFY_BIND to your Tailscale IP (e.g. 100.100.74.9)
 
 # Run the installer (idempotent — safe to re-run)
 bash scripts/install_termux.sh
