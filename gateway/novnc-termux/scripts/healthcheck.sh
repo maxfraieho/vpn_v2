@@ -107,6 +107,33 @@ check_single_workspace() {
         hc_fail "noVNC HTTP: expected 200, got ${http_code:-timeout} on port $novnc_port"
     fi
 
+    # ─── Log location check: per-workspace vs /root leak ─────────
+    local ws_tigervnc_cfg="$base_dir/.config/tigervnc"
+    local ws_log_found=false
+    for f in "$ws_tigervnc_cfg"/*":${display}.log" 2>/dev/null; do
+        if [ -f "$f" ]; then
+            ws_log_found=true
+            hc_ok "TigerVNC log: $f (per-workspace, correct)"
+            break
+        fi
+    done
+    if [ "$ws_log_found" = false ]; then
+        local root_log_found=false
+        root_log_found=$(proot-distro login "$PROOT_DISTRO" --shared-tmp -- bash -c "
+            for f in /root/.config/tigervnc/*:${display}.log; do
+                [ -f \"\$f\" ] && echo 'yes' && break
+            done
+        " 2>/dev/null || true)
+        if [ "$root_log_found" = "yes" ]; then
+            hc_fail "TigerVNC log: HOME leaked to /root! Logs in /root/.config/tigervnc/ instead of $ws_tigervnc_cfg/"
+            proot-distro login "$PROOT_DISTRO" --shared-tmp -- bash -c "
+                ls -la /root/.config/tigervnc/*:${display}.log 2>/dev/null
+            " 2>/dev/null | sed 's/^/         /' || true
+        else
+            hc_warn "TigerVNC log: not found in $ws_tigervnc_cfg/ or /root/ for display :$display"
+        fi
+    fi
+
     # ─── Log warnings (non-fatal) ────────────────────────────────
     if [ -f "$log_dir/vnc.log" ]; then
         local vnc_errors
@@ -116,6 +143,16 @@ check_single_workspace() {
             echo "$vnc_errors" | sed 's/^/         /'
         fi
     fi
+    for f in "$ws_tigervnc_cfg"/*":${display}.log" 2>/dev/null; do
+        if [ -f "$f" ]; then
+            local session_errors
+            session_errors=$(grep -iE "fatal|error|failed|abort" "$f" 2>/dev/null | tail -5 || true)
+            if [ -n "$session_errors" ]; then
+                hc_warn "TigerVNC session log errors ($f):"
+                echo "$session_errors" | sed 's/^/         /'
+            fi
+        fi
+    done
     if [ -f "$log_dir/websockify.log" ]; then
         local ws_errors
         ws_errors=$(grep -iE "error|fatal|failed" "$log_dir/websockify.log" 2>/dev/null | tail -3 || true)

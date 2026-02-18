@@ -2,21 +2,24 @@
 unset SESSION_MANAGER
 unset DBUS_SESSION_BUS_ADDRESS
 
-export XDG_RUNTIME_DIR=/tmp/runtime-$USER
+export XDG_RUNTIME_DIR="${HOME}/.run"
 mkdir -p "$XDG_RUNTIME_DIR"
 
-export XDG_CONFIG_HOME="$HOME/ws_b/profile/.config"
-export XDG_DATA_HOME="$HOME/ws_b/profile/.local/share"
-export XDG_CACHE_HOME="$HOME/ws_b/profile/.cache"
+export XDG_CONFIG_HOME="$HOME/.config"
+export XDG_DATA_HOME="$HOME/.local/share"
+export XDG_CACHE_HOME="$HOME/.cache"
 mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_CACHE_HOME"
 
 openbox &
 xterm &
 
-chromium --no-sandbox --disable-gpu \
-  --user-data-dir="$HOME/ws_b/profile/chromium" \
-  --no-first-run \
-  --disable-features=TranslateUI \
-  &
+if [ "${START_BROWSER:-0}" = "1" ]; then
+    mkdir -p "$HOME/profile/chromium"
+    chromium --no-sandbox --disable-gpu \
+      --user-data-dir="$HOME/profile/chromium" \
+      --no-first-run \
+      --disable-features=TranslateUI \
+      &
+fi
 
 wait
