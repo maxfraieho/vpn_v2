@@ -23,39 +23,46 @@ _dump_crash_attribution() {
     local xstartup_path="$4"
 
     log_err "=== CRASH ATTRIBUTION ==="
-    log_err "START_BROWSER=$START_BROWSER, BROWSER=$BROWSER"
 
     log_err "--- xstartup content ($xstartup_path) ---"
     if [ -f "$xstartup_path" ]; then
-        cat "$xstartup_path" 2>/dev/null | sed 's/^/  /' || true
+        sed 's/^/  /' "$xstartup_path" 2>/dev/null || true
     else
-        echo "  (file not found)" || true
+        echo "  (file not found at $xstartup_path)"
     fi
 
-    log_err "--- vnc.log (last 80 lines) ---"
-    tail -80 "$log_dir/vnc.log" 2>/dev/null | sed 's/^/  /' || true
+    log_err "--- xstartup.log (last 40 lines) ---"
+    tail -40 "$log_dir/xstartup.log" 2>/dev/null | sed 's/^/  /' || echo "  (no xstartup.log)"
 
-    log_err "--- Workspace TigerVNC session logs ($tigervnc_cfg) ---"
+    log_err "--- vnc.log (last 120 lines) ---"
+    tail -120 "$log_dir/vnc.log" 2>/dev/null | sed 's/^/  /' || true
+
+    log_err "--- TigerVNC session logs ($tigervnc_cfg/*:${display}.log) ---"
+    local found_session_log=false
     shopt -s nullglob
     for f in "$tigervnc_cfg"/*":${display}.log"; do
-        [ -f "$f" ] && echo "=== $f ===" && tail -80 "$f" | sed 's/^/  /'
+        found_session_log=true
+        echo "=== $f ===" && tail -120 "$f" | sed 's/^/  /'
     done
     shopt -u nullglob
+    if [ "$found_session_log" = false ]; then
+        echo "  (no session log found in $tigervnc_cfg/)"
+    fi
 
     log_err "--- /root TigerVNC logs (HOME leak check) ---"
     proot-distro login "$PROOT_DISTRO" --shared-tmp -- bash -c "
-        shopt -s nullglob
+        found=false
         for f in /root/.config/tigervnc/*:${display}.log; do
-            [ -f \"\$f\" ] && echo \"=== \$f (HOME leaked to /root!) ===\" && tail -80 \"\$f\"
+            [ -f \"\$f\" ] && echo \"=== \$f (HOME leaked to /root!) ===\" && tail -120 \"\$f\" && found=true
         done
-        shopt -u nullglob
+        [ \"\$found\" = false ] && echo '  (none — good, no HOME leak)'
     " 2>/dev/null | sed 's/^/  /' || true
 
     local dbus_lines
     dbus_lines=$(grep -ciE "dbus|udev|netlink|bus_socket" "$log_dir/vnc.log" 2>/dev/null || true)
     dbus_lines="${dbus_lines:-0}"
     if [ "$dbus_lines" -gt 0 ] 2>/dev/null; then
-        log_warn "dbus/udev/netlink errors found ($dbus_lines lines) — these are common in proot and may have caused VNC exit"
+        log_warn "dbus/udev/netlink errors ($dbus_lines lines) — common in proot, may have caused VNC exit"
     fi
 }
 
@@ -103,25 +110,13 @@ start_single_workspace() {
     else
         log_warn "xstartup template not found at $xstartup_template, writing default..."
         cat > "$xstartup_dest" << 'XEOF'
-#!/bin/bash
-exec >>"$HOME/logs/xstartup.log" 2>&1
-set -x
-
+#!/bin/sh
 unset SESSION_MANAGER
 unset DBUS_SESSION_BUS_ADDRESS
 
-export XDG_RUNTIME_DIR="$HOME/.run"
-mkdir -p "$XDG_RUNTIME_DIR"
+mkdir -p "$HOME/logs"
 
-export XDG_CONFIG_HOME="$HOME/.config"
-export XDG_DATA_HOME="$HOME/.local/share"
-export XDG_CACHE_HOME="$HOME/.cache"
-mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_CACHE_HOME"
-
-openbox &
-xterm &
-
-wait
+exec openbox-session >>"$HOME/logs/xstartup.log" 2>&1
 XEOF
     fi
     chmod +x "$xstartup_dest"
@@ -140,7 +135,7 @@ XEOF
     # ─── Start VNC server inside proot Debian ────────────────────
     if ! check_pid_alive "$vnc_pid_file"; then
         log_info "Starting Xvnc :$display on ${bind_host}:$vnc_port (HOME=$base_dir)..."
-        log_info "START_BROWSER=$START_BROWSER, BROWSER=$BROWSER"
+        log_info "xstartup: $xstartup_dest"
 
         proot-distro login "$PROOT_DISTRO" --shared-tmp -- bash -c "
             export HOME='$base_dir'
@@ -158,7 +153,7 @@ XEOF
             rm -f \"\$TIGERVNC_CFG/\"*\":${display}.pid\" 2>/dev/null
             rm -f \"\$TIGERVNC_CFG/\"*\":${display}.log\" 2>/dev/null
 
-            mkdir -p \"\$TIGERVNC_CFG\" \"\$XDG_RUNTIME_DIR\" \"\$XDG_DATA_HOME\" \"\$XDG_CACHE_HOME\"
+            mkdir -p \"\$TIGERVNC_CFG\" \"\$XDG_RUNTIME_DIR\" \"\$XDG_DATA_HOME\" \"\$XDG_CACHE_HOME\" \"\$HOME/logs\"
 
             if [ ! -f \"\$TIGERVNC_CFG/passwd\" ]; then
                 if [ -f /root/.config/tigervnc/passwd ]; then
@@ -241,6 +236,7 @@ XEOF
     nohup proot-distro login "$PROOT_DISTRO" --shared-tmp -- \
         websockify \
         --web="$NOVNC_DIR" \
+        --heartbeat 30 \
         ${WEBSOCKIFY_BIND}:${novnc_port} \
         ${bind_host}:${vnc_port} \
         > "$log_dir/websockify.log" 2>&1 &
