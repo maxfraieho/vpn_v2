@@ -36,7 +36,7 @@ fi
 
 read -r display vnc_port novnc_port geometry depth base_dir bind_host <<< "$config"
 
-if ! proot-distro login "$PROOT_DISTRO" --shared-tmp -- nc -z 127.0.0.1 "$vnc_port" 2>/dev/null; then
+if ! proot-distro login "$PROOT_DISTRO" --shared-tmp -- bash -c "export HOME='$base_dir'; nc -z 127.0.0.1 $vnc_port" 2>/dev/null; then
     log_err "VNC for workspace $WS_ID is not running (port $vnc_port). Start it first:"
     log_err "  bash $SCRIPT_DIR/start_workspace.sh $WS_ID"
     exit 1

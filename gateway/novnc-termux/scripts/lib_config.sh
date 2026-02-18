@@ -14,8 +14,9 @@ fi
 PROOT_DISTRO="${PROOT_DISTRO:-debian}"
 NOVNC_DIR="${NOVNC_DIR:-$GATEWAY_DIR/vendor/noVNC}"
 VNC_SECURITY="${VNC_SECURITY:-VncAuth}"
-START_BROWSER="${START_BROWSER:-0}"
-BROWSER="${BROWSER:-firefox}"
+START_BROWSER="$(printf '%s' "${START_BROWSER:-0}" | tr -d '\r\n\t ')"
+case "$START_BROWSER" in 0|1) ;; *) START_BROWSER=0 ;; esac
+BROWSER="$(printf '%s' "${BROWSER:-firefox}" | tr -d '\r\n\t ')"
 START_URL="${START_URL:-about:blank}"
 
 if [ -z "${WEBSOCKIFY_BIND:-}" ]; then

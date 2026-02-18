@@ -1,8 +1,11 @@
 #!/bin/bash
+exec >>"$HOME/logs/xstartup.log" 2>&1
+set -x
+
 unset SESSION_MANAGER
 unset DBUS_SESSION_BUS_ADDRESS
 
-export XDG_RUNTIME_DIR="${HOME}/.run"
+export XDG_RUNTIME_DIR="$HOME/.run"
 mkdir -p "$XDG_RUNTIME_DIR"
 
 export XDG_CONFIG_HOME="$HOME/.config"

@@ -52,8 +52,9 @@ _dump_crash_attribution() {
     " 2>/dev/null | sed 's/^/  /' || true
 
     local dbus_lines
-    dbus_lines=$(grep -ciE "dbus|udev|netlink|bus_socket" "$log_dir/vnc.log" 2>/dev/null || echo "0")
-    if [ "$dbus_lines" -gt 0 ]; then
+    dbus_lines=$(grep -ciE "dbus|udev|netlink|bus_socket" "$log_dir/vnc.log" 2>/dev/null || true)
+    dbus_lines="${dbus_lines:-0}"
+    if [ "$dbus_lines" -gt 0 ] 2>/dev/null; then
         log_warn "dbus/udev/netlink errors found ($dbus_lines lines) — these are common in proot and may have caused VNC exit"
     fi
 }
@@ -72,7 +73,6 @@ start_single_workspace() {
 
     local log_dir="$base_dir/logs"
     local pid_dir="$base_dir/run"
-    local xstartup="$base_dir/xstartup"
     local vnc_pid_file="$pid_dir/vnc.pid"
     local ws_pid_file="$pid_dir/websockify.pid"
 
@@ -91,19 +91,32 @@ start_single_workspace() {
         log_warn "websockify not running, restarting..."
     fi
 
-    # ─── Prepare xstartup inside workspace base_dir ───────────────
+    # ─── Prepare xstartup: always overwrite from config template ──
     local ws_tigervnc_cfg="$base_dir/.config/tigervnc"
+    local xstartup_dest="$ws_tigervnc_cfg/xstartup"
+    local xstartup_template="$GATEWAY_DIR/configs/workspace_${ws_id}/xstartup"
     mkdir -p "$ws_tigervnc_cfg"
 
-    if [ ! -f "$xstartup" ]; then
-        log_warn "xstartup not found at $xstartup, creating default..."
-        cat > "$xstartup" << 'XEOF'
+    if [ -f "$xstartup_template" ]; then
+        cp "$xstartup_template" "$xstartup_dest"
+        log_info "xstartup installed from template: $xstartup_template -> $xstartup_dest"
+    else
+        log_warn "xstartup template not found at $xstartup_template, writing default..."
+        cat > "$xstartup_dest" << 'XEOF'
 #!/bin/bash
+exec >>"$HOME/logs/xstartup.log" 2>&1
+set -x
+
 unset SESSION_MANAGER
 unset DBUS_SESSION_BUS_ADDRESS
 
-export XDG_RUNTIME_DIR="${HOME}/.run"
+export XDG_RUNTIME_DIR="$HOME/.run"
 mkdir -p "$XDG_RUNTIME_DIR"
+
+export XDG_CONFIG_HOME="$HOME/.config"
+export XDG_DATA_HOME="$HOME/.local/share"
+export XDG_CACHE_HOME="$HOME/.cache"
+mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_CACHE_HOME"
 
 openbox &
 xterm &
@@ -111,11 +124,9 @@ xterm &
 wait
 XEOF
     fi
-    chmod +x "$xstartup"
+    chmod +x "$xstartup_dest"
 
-    cp "$xstartup" "$ws_tigervnc_cfg/xstartup"
-    chmod +x "$ws_tigervnc_cfg/xstartup"
-    log_info "xstartup installed at $ws_tigervnc_cfg/xstartup"
+    rm -f "$base_dir/xstartup" 2>/dev/null
 
     local vnc_sec_args=""
     if [ "$VNC_SECURITY" = "None" ] || [ "$VNC_SECURITY" = "none" ]; then
@@ -185,7 +196,7 @@ XEOF
 
         if [ "$vnc_up" != true ]; then
             log_err "Failed to start Xvnc :$display (port $vnc_port not responding after 20s)"
-            _dump_crash_attribution "$ws_tigervnc_cfg" "$display" "$log_dir" "$xstartup"
+            _dump_crash_attribution "$ws_tigervnc_cfg" "$display" "$log_dir" "$xstartup_dest"
             return 1
         fi
         log_ok "Xvnc :$display listening on port $vnc_port"
@@ -193,13 +204,14 @@ XEOF
         sleep 3
         if ! proot-distro login "$PROOT_DISTRO" --shared-tmp -- nc -z 127.0.0.1 "$vnc_port" 2>/dev/null; then
             log_err "Xvnc :$display exited shortly after start (port $vnc_port gone after 3s)"
-            _dump_crash_attribution "$ws_tigervnc_cfg" "$display" "$log_dir" "$xstartup"
+            _dump_crash_attribution "$ws_tigervnc_cfg" "$display" "$log_dir" "$xstartup_dest"
             return 1
         fi
 
         local dbus_udev_warns
-        dbus_udev_warns=$(grep -ciE "dbus|udev|netlink|bus_socket" "$log_dir/vnc.log" 2>/dev/null || echo "0")
-        if [ "$dbus_udev_warns" -gt 0 ]; then
+        dbus_udev_warns=$(grep -ciE "dbus|udev|netlink|bus_socket" "$log_dir/vnc.log" 2>/dev/null || true)
+        dbus_udev_warns="${dbus_udev_warns:-0}"
+        if [ "$dbus_udev_warns" -gt 0 ] 2>/dev/null; then
             log_warn "dbus/udev/netlink warnings in vnc.log ($dbus_udev_warns lines) — non-fatal in proot"
         fi
 
