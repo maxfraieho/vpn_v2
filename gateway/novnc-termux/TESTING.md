@@ -96,7 +96,8 @@ Expected output (abbreviated):
 ## Step 3 — Set VNC password (first time only)
 
 ```bash
-proot-distro login debian -- vncpasswd
+mkdir -p ~/.config/tigervnc
+proot-distro login debian -- vncpasswd ~/.config/tigervnc/passwd
 ```
 
 Expected output:
@@ -105,6 +106,10 @@ Password:
 Verify:
 Would you like to enter a view-only password (y/n)? n
 ```
+
+> TigerVNC on Debian stores config in `~/.config/tigervnc/` (not `~/.vnc/`).
+> If you previously ran `vncpasswd` without a path, the start script will
+> auto-migrate `~/.vnc/passwd` to `~/.config/tigervnc/passwd` and remove `~/.vnc/`.
 
 ---
 
@@ -395,7 +400,8 @@ cat ~/ws_a/logs/vnc.log
 
 Common issues:
 - `Address already in use` → Run `stop_workspace.sh all` first, then clean: `rm -f /tmp/.X1-lock /tmp/.X2-lock`
-- `Password file not found` → Run `proot-distro login debian -- vncpasswd`
+- `Password file not found` → Run `mkdir -p ~/.config/tigervnc && proot-distro login debian -- vncpasswd ~/.config/tigervnc/passwd`
+- `Could not migrate .vnc to .config/tigervnc` → Remove legacy dir: `rm -rf ~/.vnc` then restart
 
 ### websockify fails to start
 

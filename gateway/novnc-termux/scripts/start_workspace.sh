@@ -76,13 +76,22 @@ XEOF
         log_info "Starting Xvnc :$display on ${bind_host}:$vnc_port..."
 
         proot-distro login "$PROOT_DISTRO" --shared-tmp -- bash -c "
-            export HOME=\"$HOME\"
             export USER=\"\$(whoami)\"
+            DEB_HOME=\"\$HOME\"
+            TIGERVNC_CFG=\"\$HOME/.config/tigervnc\"
 
-            mkdir -p \"\$HOME/.vnc\"
+            # Preflight: migrate legacy .vnc to .config/tigervnc
+            mkdir -p \"\$TIGERVNC_CFG\"
+            if [ -f \"\$HOME/.vnc/passwd\" ] && [ ! -f \"\$TIGERVNC_CFG/passwd\" ]; then
+                cp \"\$HOME/.vnc/passwd\" \"\$TIGERVNC_CFG/passwd\"
+                chmod 600 \"\$TIGERVNC_CFG/passwd\"
+            fi
+            if [ -d \"\$HOME/.vnc\" ]; then
+                mv \"\$HOME/.vnc\" \"\$HOME/.vnc.bak.\$\$\" 2>/dev/null || true
+            fi
 
-            cp \"$xstartup\" \"\$HOME/.vnc/xstartup\"
-            chmod +x \"\$HOME/.vnc/xstartup\"
+            cp \"$xstartup\" \"\$TIGERVNC_CFG/xstartup\"
+            chmod +x \"\$TIGERVNC_CFG/xstartup\"
 
             vncserver -kill :$display 2>/dev/null || true
             sleep 1
@@ -92,7 +101,8 @@ XEOF
                 -geometry $geometry \
                 -depth $depth \
                 $vnc_sec_args \
-                -xstartup \"\$HOME/.vnc/xstartup\" \
+                -passwd \"\$TIGERVNC_CFG/passwd\" \
+                -xstartup \"\$TIGERVNC_CFG/xstartup\" \
                 > \"$log_dir/vnc.log\" 2>&1
         " &
 
@@ -112,9 +122,16 @@ XEOF
             echo "$vnc_pid" > "$vnc_pid_file"
             log_ok "Xvnc :$display started (PID $vnc_pid)"
         else
-            # Try reading PID from TigerVNC's own PID file
-            local tigervnc_pid_file="$HOME/.vnc/$(hostname):${display}.pid"
-            if [ -f "$tigervnc_pid_file" ]; then
+            local tigervnc_pid_file
+            for _pf in \
+                "$HOME/.config/tigervnc/$(hostname):${display}.pid" \
+                "$HOME/.vnc/$(hostname):${display}.pid"; do
+                if [ -f "$_pf" ]; then
+                    tigervnc_pid_file="$_pf"
+                    break
+                fi
+            done
+            if [ -n "${tigervnc_pid_file:-}" ] && [ -f "$tigervnc_pid_file" ]; then
                 vnc_pid=$(cat "$tigervnc_pid_file" 2>/dev/null)
                 if [ -n "$vnc_pid" ] && kill -0 "$vnc_pid" 2>/dev/null; then
                     echo "$vnc_pid" > "$vnc_pid_file"

@@ -27,10 +27,14 @@ bash scripts/install_termux.sh
 ### 2. Set VNC password (required — default is VncAuth)
 
 ```bash
-proot-distro login debian -- vncpasswd
+mkdir -p ~/.config/tigervnc
+proot-distro login debian -- vncpasswd ~/.config/tigervnc/passwd
 # Enter and confirm a password
 ```
 
+> TigerVNC on Debian uses `~/.config/tigervnc/` (not `~/.vnc/`).
+> The start script handles migration automatically if you previously used `~/.vnc/`.
+>
 > VNC uses password authentication by default (`VNC_SECURITY=VncAuth`).
 > To disable password auth (not recommended), set `VNC_SECURITY=None` in `.env`.
 
