@@ -62,7 +62,7 @@ fi
 # ─── Step 4: Debian guest packages ──────────────────────────────
 log_info "Step 4/5: Installing packages inside Debian guest..."
 
-DEBIAN_PKGS="xfce4 xfce4-terminal chromium tigervnc-standalone-server dbus-x11 procps websockify python3-websockify"
+DEBIAN_PKGS="xfce4 xfce4-terminal chromium tigervnc-standalone-server dbus-x11 procps websockify python3-websockify netcat-openbsd"
 
 proot-distro login "$PROOT_DISTRO" -- bash -c "
     export DEBIAN_FRONTEND=noninteractive

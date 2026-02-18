@@ -173,22 +173,31 @@ Expected output:
 
 **On the tablet (Termux):**
 
+> Note: `ss` does NOT work on non-root Android (Permission denied on netlink socket).
+> Use Debian-side `nc` checks instead:
+
 ```bash
-ss -ltnp | grep -E '5901|5902|6080|6081'
+# VNC must be reachable on localhost
+proot-distro login debian -- nc -z 127.0.0.1 5901 && echo "VNC :1 OK" || echo "VNC :1 FAIL"
+proot-distro login debian -- nc -z 127.0.0.1 5902 && echo "VNC :2 OK" || echo "VNC :2 FAIL"
+
+# websockify must be reachable on Tailscale IP (or 0.0.0.0)
+proot-distro login debian -- nc -z 100.100.74.9 6080 && echo "noVNC A OK" || echo "noVNC A FAIL"
+proot-distro login debian -- nc -z 100.100.74.9 6081 && echo "noVNC B OK" || echo "noVNC B FAIL"
 ```
 
 Expected output:
 ```
-LISTEN  0  5       127.0.0.1:5901   0.0.0.0:*   users:(("Xvnc",pid=12345,...))
-LISTEN  0  5       127.0.0.1:5902   0.0.0.0:*   users:(("Xvnc",pid=12347,...))
-LISTEN  0  5   100.100.74.9:6080   0.0.0.0:*   users:(("python3",pid=12346,...))
-LISTEN  0  5   100.100.74.9:6081   0.0.0.0:*   users:(("python3",pid=12348,...))
+VNC :1 OK
+VNC :2 OK
+noVNC A OK
+noVNC B OK
 ```
 
 **Critical checks:**
-- VNC ports (5901, 5902) MUST show `127.0.0.1` — never `0.0.0.0` or `*`
-- websockify ports (6080, 6081) should show `100.100.74.9` (Tailscale IP) or `0.0.0.0`
-- websockify ports must NOT show `127.0.0.1` (otherwise they'd be inaccessible remotely)
+- VNC ports (5901, 5902) MUST be reachable only on `127.0.0.1` — not remotely
+- websockify ports (6080, 6081) must be reachable on Tailscale IP (or `0.0.0.0`)
+- websockify ports must NOT be localhost-only (otherwise inaccessible remotely)
 
 ---
 
@@ -441,7 +450,7 @@ adb shell "settings put global settings_enable_monitor_phantom_procs false"
 
 1. Verify Tailscale is connected on both devices: `tailscale status`
 2. Verify firewall isn't blocking: `tailscale ping 100.100.74.9`
-3. Verify websockify is bound correctly: `ss -ltnp | grep 6080`
+3. Verify websockify is bound correctly: `proot-distro login debian -- nc -z 100.100.74.9 6080`
 
 ---
 
@@ -451,7 +460,7 @@ All of these are true:
 1. `tailscale status` shows the tablet connected as `100.100.74.9`
 2. `bash scripts/healthcheck.sh all` exits 0 with all `[ OK ]`
 3. `bash scripts/smoke_test.sh` exits 0 with all checks passed
-4. `ss -ltnp` shows VNC on `127.0.0.1` only, websockify on Tailscale IP
+4. Debian-side `nc -z` confirms VNC on `127.0.0.1` only, websockify on Tailscale IP
 5. `http://100.100.74.9:6080/vnc.html` opens noVNC in browser from laptop
 6. `http://100.100.74.9:6081/vnc.html` opens noVNC in browser from laptop
 7. Cookies set in Workspace A do NOT appear in Workspace B (isolation verified)

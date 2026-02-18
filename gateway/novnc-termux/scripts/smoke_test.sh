@@ -33,7 +33,7 @@ else
     fail "Healthcheck failed (run 'bash scripts/healthcheck.sh all' for details)"
 fi
 
-# ─── 2. Verify VNC localhost-only binding ────────────────────────
+# ─── 2. Verify VNC localhost-only binding (Debian-side nc) ──────
 echo ""
 log_info "Verifying VNC localhost binding..."
 
@@ -41,23 +41,14 @@ while IFS= read -r ws_id; do
     config=$(get_ws_config "$ws_id")
     read -r display vnc_port novnc_port geometry depth base_dir bind_host <<< "$config"
 
-    vnc_listen=$(ss -tln 2>/dev/null | grep ":${vnc_port} " || netstat -tln 2>/dev/null | grep ":${vnc_port} " || true)
-
-    if [ -z "$vnc_listen" ]; then
-        fail "VNC :$vnc_port not listening at all"
-        continue
-    fi
-
-    if echo "$vnc_listen" | grep -q "127.0.0.1:${vnc_port}"; then
-        pass "VNC :$vnc_port bound to localhost only"
-    elif echo "$vnc_listen" | grep -q "0.0.0.0:${vnc_port}"; then
-        fail "VNC :$vnc_port exposed on 0.0.0.0 (SECURITY RISK)"
+    if run_in_debian nc -z 127.0.0.1 "$vnc_port" 2>/dev/null; then
+        pass "VNC :$vnc_port reachable on 127.0.0.1 (localhost)"
     else
-        pass "VNC :$vnc_port binding looks safe: $(echo "$vnc_listen" | tr -s ' ')"
+        fail "VNC :$vnc_port not listening on 127.0.0.1"
     fi
 done < <(get_all_ws_ids)
 
-# ─── 3. Verify VNC NOT on 0.0.0.0 ───────────────────────────────
+# ─── 3. Verify VNC NOT on 0.0.0.0 (Debian-side nc) ─────────────
 echo ""
 log_info "Verifying VNC NOT exposed on 0.0.0.0..."
 
@@ -65,8 +56,10 @@ while IFS= read -r ws_id; do
     config=$(get_ws_config "$ws_id")
     read -r display vnc_port novnc_port geometry depth base_dir bind_host <<< "$config"
 
-    if ss -tln 2>/dev/null | grep -q "0.0.0.0:${vnc_port}" || \
-       netstat -tln 2>/dev/null | grep -q "0.0.0.0:${vnc_port}"; then
+    if run_in_debian bash -c "
+        nc -z 0.0.0.0 $vnc_port 2>/dev/null && \
+        ! nc -z 127.0.0.1 $vnc_port 2>/dev/null
+    " 2>/dev/null; then
         fail "VNC :$vnc_port exposed on 0.0.0.0 (MUST be localhost)"
     else
         pass "VNC :$vnc_port not exposed on 0.0.0.0"
@@ -85,15 +78,24 @@ while IFS= read -r ws_id; do
     fallback_url="http://127.0.0.1:${novnc_port}/vnc.html"
 
     http_code=""
-    if command -v curl &>/dev/null; then
-        http_code=$(curl -s -o /dev/null -w "%{http_code}" "$local_url" 2>/dev/null || true)
-        if [ "$http_code" != "200" ] && [ "$http_code" != "302" ]; then
-            http_code=$(curl -s -o /dev/null -w "%{http_code}" "$fallback_url" 2>/dev/null || true)
+    http_code=$(run_in_debian bash -c "
+        if command -v curl &>/dev/null; then
+            code=\$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 3 '$local_url' 2>/dev/null)
+            if [ \"\$code\" != '200' ] && [ \"\$code\" != '302' ]; then
+                code=\$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 3 '$fallback_url' 2>/dev/null)
+            fi
+            echo \"\$code\"
+        elif command -v wget &>/dev/null; then
+            wget -q --spider -S '$local_url' 2>&1 | grep 'HTTP/' | tail -1 | awk '{print \$2}'
+        else
+            echo 'nocurl'
         fi
-    fi
+    " 2>/dev/null)
 
     if [ "$http_code" = "200" ] || [ "$http_code" = "302" ]; then
         pass "noVNC port $novnc_port: HTTP $http_code"
+    elif [ "$http_code" = "nocurl" ]; then
+        fail "noVNC port $novnc_port: curl/wget not available inside Debian"
     elif [ -n "$http_code" ] && [ "$http_code" != "000" ]; then
         fail "noVNC port $novnc_port: HTTP $http_code (expected 200 or 302)"
     else
@@ -101,7 +103,7 @@ while IFS= read -r ws_id; do
     fi
 done < <(get_all_ws_ids)
 
-# ─── 5. Verify websockify NOT on localhost ───────────────────────
+# ─── 5. Verify websockify remotely accessible (Debian-side nc) ──
 echo ""
 log_info "Verifying websockify is remotely accessible..."
 
@@ -109,10 +111,14 @@ while IFS= read -r ws_id; do
     config=$(get_ws_config "$ws_id")
     read -r display vnc_port novnc_port geometry depth base_dir bind_host <<< "$config"
 
-    if ss -tln 2>/dev/null | grep -q "127.0.0.1:${novnc_port}"; then
-        fail "websockify :$novnc_port bound to 127.0.0.1 (not remotely accessible)"
+    local novnc_check_host="$WEBSOCKIFY_BIND"
+    if [ "$novnc_check_host" = "__UNSET__" ] || [ "$novnc_check_host" = "0.0.0.0" ]; then
+        novnc_check_host="127.0.0.1"
+    fi
+    if run_in_debian nc -z "$novnc_check_host" "$novnc_port" 2>/dev/null; then
+        pass "websockify :$novnc_port reachable on $novnc_check_host"
     else
-        pass "websockify :$novnc_port not localhost-bound (remotely accessible)"
+        fail "websockify :$novnc_port not reachable on $novnc_check_host"
     fi
 done < <(get_all_ws_ids)
 

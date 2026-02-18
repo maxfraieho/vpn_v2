@@ -13,98 +13,18 @@ usage() {
     exit 1
 }
 
-check_process_by_pid() {
-    local pid_file="$1"
-    local name="$2"
-
-    if [ ! -f "$pid_file" ]; then
-        echo -e "  ${RED}[FAIL]${NC} $name: no PID file"
-        OVERALL_STATUS=1
-        return 1
-    fi
-
-    local pid
-    pid=$(cat "$pid_file" 2>/dev/null)
-
-    if [ -z "$pid" ]; then
-        echo -e "  ${RED}[FAIL]${NC} $name: empty PID file"
-        OVERALL_STATUS=1
-        return 1
-    fi
-
-    if kill -0 "$pid" 2>/dev/null; then
-        echo -e "  ${GREEN}[ OK ]${NC} $name: running (PID $pid)"
-        return 0
-    else
-        echo -e "  ${RED}[FAIL]${NC} $name: not running (stale PID $pid)"
-        OVERALL_STATUS=1
-        return 1
-    fi
-}
-
-check_process_by_pattern() {
-    local pattern="$1"
-    local name="$2"
-
-    local pid
-    pid=$(pgrep -f "$pattern" 2>/dev/null | head -1)
-
-    if [ -n "$pid" ]; then
-        echo -e "  ${GREEN}[ OK ]${NC} $name: running (PID $pid)"
-        return 0
-    else
-        echo -e "  ${RED}[FAIL]${NC} $name: not running"
-        OVERALL_STATUS=1
-        return 1
-    fi
-}
-
-check_port() {
-    local port="$1"
-    local name="$2"
-
-    if ss -tln 2>/dev/null | grep -q ":${port} " || \
-       netstat -tln 2>/dev/null | grep -q ":${port} "; then
-        echo -e "  ${GREEN}[ OK ]${NC} $name: port $port listening"
-        return 0
-    else
-        echo -e "  ${RED}[FAIL]${NC} $name: port $port not listening"
-        OVERALL_STATUS=1
-        return 1
-    fi
-}
-
-check_novnc_http() {
-    local port="$1"
-    local name="$2"
-
-    if command -v curl &>/dev/null; then
-        local http_code=""
-        if [ "$WEBSOCKIFY_BIND" != "__UNSET__" ] && [ "$WEBSOCKIFY_BIND" != "127.0.0.1" ]; then
-            http_code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 3 "http://${WEBSOCKIFY_BIND}:${port}/vnc.html" 2>/dev/null || true)
-        fi
-        if [ "$http_code" != "200" ] && [ "$http_code" != "302" ]; then
-            http_code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 3 "http://127.0.0.1:${port}/vnc.html" 2>/dev/null || true)
-        fi
-        if [ "$http_code" = "200" ] || [ "$http_code" = "302" ]; then
-            echo -e "  ${GREEN}[ OK ]${NC} $name: HTTP $http_code on port $port"
-            return 0
-        else
-            echo -e "  ${YELLOW}[WARN]${NC} $name: HTTP check failed on port $port (port may still be ok)"
-            return 0
-        fi
-    fi
-    return 0
-}
+hc_ok()   { echo -e "  ${GREEN}[ OK ]${NC} $1"; }
+hc_fail() { echo -e "  ${RED}[FAIL]${NC} $1"; OVERALL_STATUS=1; }
+hc_warn() { echo -e "  ${YELLOW}[WARN]${NC} $1"; }
+hc_cfg()  { echo -e "  ${BLUE}[CFG ]${NC} $1"; }
 
 check_single_workspace() {
     local ws_id="$1"
     local config
     config=$(get_ws_config "$ws_id")
     if [ -z "$config" ]; then
-        echo -e "${RED}[ERR] Unknown workspace: $ws_id${NC}"
-        OVERALL_STATUS=1
-        return 1
+        hc_fail "Unknown workspace: $ws_id"
+        return
     fi
 
     local display vnc_port novnc_port geometry depth base_dir bind_host
@@ -113,37 +33,93 @@ check_single_workspace() {
     local pid_dir="$base_dir/run"
     local vnc_pid_file="$pid_dir/vnc.pid"
     local ws_pid_file="$pid_dir/websockify.pid"
+    local log_dir="$base_dir/logs"
 
     echo ""
     echo -e "${BLUE}--- Workspace ${ws_id^^} (display :$display) ---${NC}"
 
-    if ! check_process_by_pid "$vnc_pid_file" "Xvnc :$display"; then
-        check_process_by_pattern "Xvnc.*:${display}" "Xvnc :$display (by pattern)"
+    # ─── VNC process check ───────────────────────────────────────
+    if check_pid_alive "$vnc_pid_file"; then
+        local vnc_pid
+        vnc_pid=$(cat "$vnc_pid_file")
+        hc_ok "Xvnc :$display: running (PID $vnc_pid)"
+    else
+        local vnc_pid
+        vnc_pid=$(pgrep -f "Xvnc.*:${display}" 2>/dev/null | head -1)
+        if [ -n "$vnc_pid" ]; then
+            hc_ok "Xvnc :$display: running (PID $vnc_pid, no pidfile)"
+        else
+            hc_fail "Xvnc :$display: not running"
+        fi
     fi
 
-    check_port "$vnc_port" "VNC port"
-
-    if ! check_process_by_pid "$ws_pid_file" "websockify"; then
-        check_process_by_pattern "websockify.*${novnc_port}" "websockify (by pattern)"
+    # ─── VNC port check (Debian-side nc — no ss) ─────────────────
+    if run_in_debian nc -z 127.0.0.1 "$vnc_port" 2>/dev/null; then
+        hc_ok "VNC port: port $vnc_port listening"
+    else
+        hc_fail "VNC port: port $vnc_port not listening"
     fi
 
-    check_port "$novnc_port" "noVNC port"
-    check_novnc_http "$novnc_port" "noVNC HTTP"
+    # ─── websockify process check ────────────────────────────────
+    if check_pid_alive "$ws_pid_file"; then
+        local ws_pid
+        ws_pid=$(cat "$ws_pid_file")
+        hc_ok "websockify: running (PID $ws_pid)"
+    else
+        local ws_pid
+        ws_pid=$(pgrep -f "websockify.*${novnc_port}" 2>/dev/null | head -1)
+        if [ -n "$ws_pid" ]; then
+            hc_ok "websockify: running (PID $ws_pid, no pidfile)"
+        else
+            hc_fail "websockify: not running"
+        fi
+    fi
 
-    local log_dir="$base_dir/logs"
+    # ─── noVNC port check (Debian-side nc — no ss) ───────────────
+    local novnc_check_host="$WEBSOCKIFY_BIND"
+    if [ "$novnc_check_host" = "__UNSET__" ] || [ "$novnc_check_host" = "0.0.0.0" ]; then
+        novnc_check_host="127.0.0.1"
+    fi
+    if run_in_debian nc -z "$novnc_check_host" "$novnc_port" 2>/dev/null; then
+        hc_ok "noVNC port: port $novnc_port listening"
+    else
+        hc_fail "noVNC port: port $novnc_port not listening"
+    fi
+
+    # ─── noVNC HTTP check (via Debian curl/wget) ─────────────────
+    local http_url="http://${novnc_check_host}:${novnc_port}/vnc.html"
+    local http_code
+    http_code=$(run_in_debian bash -c "
+        if command -v curl &>/dev/null; then
+            curl -s -o /dev/null -w '%{http_code}' --connect-timeout 3 '$http_url' 2>/dev/null
+        elif command -v wget &>/dev/null; then
+            wget -q --spider -S '$http_url' 2>&1 | grep 'HTTP/' | tail -1 | awk '{print \$2}'
+        else
+            echo 'nocurl'
+        fi
+    " 2>/dev/null)
+    if [ "$http_code" = "200" ] || [ "$http_code" = "302" ]; then
+        hc_ok "noVNC HTTP: HTTP $http_code on port $novnc_port"
+    elif [ "$http_code" = "nocurl" ]; then
+        hc_warn "noVNC HTTP: curl/wget not available inside Debian (skipped)"
+    else
+        hc_fail "noVNC HTTP: expected 200, got ${http_code:-timeout} on port $novnc_port"
+    fi
+
+    # ─── Log warnings (non-fatal) ────────────────────────────────
     if [ -f "$log_dir/vnc.log" ]; then
         local vnc_errors
-        vnc_errors=$(grep -i "error\|fatal\|failed" "$log_dir/vnc.log" 2>/dev/null | tail -3)
+        vnc_errors=$(grep -iE "fatal|failed to start|password.*not found" "$log_dir/vnc.log" 2>/dev/null | tail -3)
         if [ -n "$vnc_errors" ]; then
-            echo -e "  ${YELLOW}[WARN]${NC} Recent VNC log errors:"
+            hc_warn "Recent VNC log errors:"
             echo "$vnc_errors" | sed 's/^/         /'
         fi
     fi
     if [ -f "$log_dir/websockify.log" ]; then
         local ws_errors
-        ws_errors=$(grep -i "error\|fatal\|failed" "$log_dir/websockify.log" 2>/dev/null | tail -3)
+        ws_errors=$(grep -iE "error|fatal|failed" "$log_dir/websockify.log" 2>/dev/null | tail -3)
         if [ -n "$ws_errors" ]; then
-            echo -e "  ${YELLOW}[WARN]${NC} Recent websockify log errors:"
+            hc_warn "Recent websockify log errors:"
             echo "$ws_errors" | sed 's/^/         /'
         fi
     fi
@@ -162,23 +138,23 @@ echo -e "${BLUE}--- Infrastructure ---${NC}"
 if command -v tailscale &>/dev/null; then
     if tailscale status &>/dev/null 2>&1; then
         local_ip=$(tailscale ip -4 2>/dev/null || echo "unknown")
-        echo -e "  ${GREEN}[ OK ]${NC} Tailscale: connected ($local_ip)"
+        hc_ok "Tailscale: connected ($local_ip)"
     else
-        echo -e "  ${YELLOW}[WARN]${NC} Tailscale: not connected"
+        hc_warn "Tailscale: not connected"
     fi
 else
-    echo -e "  ${YELLOW}[WARN]${NC} Tailscale: not installed"
+    hc_warn "Tailscale: not installed"
 fi
 
 if command -v termux-wake-lock &>/dev/null; then
-    echo -e "  ${GREEN}[ OK ]${NC} termux-wake-lock: available"
+    hc_ok "termux-wake-lock: available"
 else
-    echo -e "  ${YELLOW}[WARN]${NC} termux-wake-lock: not available (processes may be killed)"
+    hc_warn "termux-wake-lock: not available (processes may be killed)"
 fi
 
-echo -e "  ${BLUE}[CFG ]${NC} VNC security: $VNC_SECURITY"
-echo -e "  ${BLUE}[CFG ]${NC} websockify bind: $WEBSOCKIFY_BIND"
-echo -e "  ${BLUE}[CFG ]${NC} Config: $CONFIG_FILE"
+hc_cfg "VNC security: $VNC_SECURITY"
+hc_cfg "websockify bind: $WEBSOCKIFY_BIND"
+hc_cfg "Config: $CONFIG_FILE"
 
 case "$TARGET" in
     all)

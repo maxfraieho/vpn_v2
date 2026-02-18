@@ -35,31 +35,41 @@ stop_single_workspace() {
     echo ""
     log_info "Stopping Workspace ${ws_id^^}..."
 
+    # ─── Stop websockify ─────────────────────────────────────────
     kill_by_pid_file "$ws_pid_file" "websockify (port $novnc_port)"
 
     local orphan_ws
     orphan_ws=$(pgrep -f "websockify.*${novnc_port}" 2>/dev/null | head -1)
     if [ -n "$orphan_ws" ]; then
-        kill "$orphan_ws" 2>/dev/null || true
-        log_info "Cleaned up orphan websockify process"
+        log_warn "Killing orphan websockify on port $novnc_port (PID $orphan_ws)..."
+        kill -9 "$orphan_ws" 2>/dev/null || true
     fi
 
-    log_info "Killing Xvnc :$display..."
-    proot-distro login "$PROOT_DISTRO" --shared-tmp -- bash -c "
+    # ─── Stop VNC via pid file first ─────────────────────────────
+    kill_by_pid_file "$vnc_pid_file" "Xvnc :$display"
+
+    # ─── Kill via vncserver -kill inside Debian ──────────────────
+    log_info "Killing Xvnc :$display inside Debian..."
+    run_in_debian bash -c "
         vncserver -kill :$display 2>/dev/null || true
     " 2>/dev/null || true
 
-    kill_by_pid_file "$vnc_pid_file" "Xvnc :$display"
-
+    # ─── Kill orphan Xvnc process ────────────────────────────────
     local orphan_vnc
     orphan_vnc=$(pgrep -f "Xvnc.*:${display}" 2>/dev/null | head -1)
     if [ -n "$orphan_vnc" ]; then
-        kill "$orphan_vnc" 2>/dev/null || true
-        log_info "Cleaned up orphan Xvnc process"
+        log_warn "Killing orphan Xvnc :$display (PID $orphan_vnc)..."
+        kill -9 "$orphan_vnc" 2>/dev/null || true
     fi
 
-    rm -f "/tmp/.X${display}-lock" 2>/dev/null
-    rm -f "/tmp/.X11-unix/X${display}" 2>/dev/null
+    # ─── Cleanup inside Debian: locks, sockets, stale pids ──────
+    run_in_debian bash -c "
+        rm -f /tmp/.X${display}-lock
+        rm -f /tmp/.X11-unix/X${display}
+        TIGERVNC_CFG=\"\$HOME/.config/tigervnc\"
+        rm -f \"\$TIGERVNC_CFG/\"*\":${display}.pid\" 2>/dev/null
+        rm -f \"\$TIGERVNC_CFG/\"*\":${display}.log\" 2>/dev/null
+    " 2>/dev/null || true
 
     log_ok "Workspace ${ws_id^^} stopped"
 }

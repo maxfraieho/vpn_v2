@@ -61,7 +61,6 @@ XEOF
         chmod +x "$xstartup"
     fi
 
-    # ─── Build VNC security args ─────────────────────────────────
     local vnc_sec_args=""
     if [ "$VNC_SECURITY" = "None" ] || [ "$VNC_SECURITY" = "none" ]; then
         vnc_sec_args="-SecurityTypes None --I-KNOW-THIS-IS-INSECURE"
@@ -77,11 +76,20 @@ XEOF
 
         proot-distro login "$PROOT_DISTRO" --shared-tmp -- bash -c "
             export USER=\"\$(whoami)\"
-            DEB_HOME=\"\$HOME\"
             TIGERVNC_CFG=\"\$HOME/.config/tigervnc\"
 
-            # Preflight: migrate legacy .vnc to .config/tigervnc
+            # Preflight: clean stale X locks/sockets for this display
+            rm -f /tmp/.X${display}-lock
+            rm -f /tmp/.X11-unix/X${display}
+
+            # Clean stale TigerVNC pid/log for this display
+            rm -f \"\$TIGERVNC_CFG/\"*\":${display}.pid\" 2>/dev/null
+            rm -f \"\$TIGERVNC_CFG/\"*\":${display}.log\" 2>/dev/null
+
+            # Ensure config dir exists
             mkdir -p \"\$TIGERVNC_CFG\"
+
+            # Migrate legacy .vnc passwd if needed
             if [ -f \"\$HOME/.vnc/passwd\" ] && [ ! -f \"\$TIGERVNC_CFG/passwd\" ]; then
                 cp \"\$HOME/.vnc/passwd\" \"\$TIGERVNC_CFG/passwd\"
                 chmod 600 \"\$TIGERVNC_CFG/passwd\"
@@ -107,39 +115,31 @@ XEOF
         " &
 
         local retries=0
+        local vnc_up=false
         while [ $retries -lt 20 ]; do
             sleep 1
             retries=$((retries + 1))
-            if pgrep -f "Xvnc.*:${display}" &>/dev/null; then
-                sleep 1
+            if run_in_debian nc -z 127.0.0.1 "$vnc_port" 2>/dev/null; then
+                vnc_up=true
                 break
             fi
         done
 
-        local vnc_pid
-        vnc_pid=$(pgrep -f "Xvnc.*:${display}" 2>/dev/null | head -1)
-        if [ -n "$vnc_pid" ]; then
-            echo "$vnc_pid" > "$vnc_pid_file"
-            log_ok "Xvnc :$display started (PID $vnc_pid)"
+        if [ "$vnc_up" = true ]; then
+            local vnc_pid
+            vnc_pid=$(pgrep -f "Xvnc.*:${display}" 2>/dev/null | head -1)
+            if [ -n "$vnc_pid" ]; then
+                echo "$vnc_pid" > "$vnc_pid_file"
+                log_ok "Xvnc :$display started (PID $vnc_pid)"
+            else
+                log_ok "Xvnc :$display listening on port $vnc_port (PID not captured via pgrep)"
+            fi
         else
-            local tigervnc_pid_file
-            for _pf in \
-                "$HOME/.config/tigervnc/$(hostname):${display}.pid" \
-                "$HOME/.vnc/$(hostname):${display}.pid"; do
-                if [ -f "$_pf" ]; then
-                    tigervnc_pid_file="$_pf"
-                    break
-                fi
-            done
-            if [ -n "${tigervnc_pid_file:-}" ] && [ -f "$tigervnc_pid_file" ]; then
-                vnc_pid=$(cat "$tigervnc_pid_file" 2>/dev/null)
-                if [ -n "$vnc_pid" ] && kill -0 "$vnc_pid" 2>/dev/null; then
-                    echo "$vnc_pid" > "$vnc_pid_file"
-                    log_ok "Xvnc :$display started (PID $vnc_pid, from TigerVNC pidfile)"
-                else
-                    log_err "Failed to start Xvnc :$display. Check $log_dir/vnc.log"
-                    return 1
-                fi
+            local vnc_pid
+            vnc_pid=$(pgrep -f "Xvnc.*:${display}" 2>/dev/null | head -1)
+            if [ -n "$vnc_pid" ]; then
+                echo "$vnc_pid" > "$vnc_pid_file"
+                log_ok "Xvnc :$display started (PID $vnc_pid, nc check skipped)"
             else
                 log_err "Failed to start Xvnc :$display. Check $log_dir/vnc.log"
                 return 1
