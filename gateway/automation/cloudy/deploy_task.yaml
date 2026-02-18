@@ -1,0 +1,5 @@
+name: deploy_workspace
+description: Install and start SwissWorkspaceGateway on Termux
+steps:
+  - run: bash gateway/novnc-termux/scripts/install_termux.sh
+  - run: bash gateway/novnc-termux/scripts/start_workspace.sh

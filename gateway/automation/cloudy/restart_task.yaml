@@ -1,0 +1,5 @@
+name: restart_workspace
+description: Restart SwissWorkspaceGateway services
+steps:
+  - run: bash gateway/novnc-termux/scripts/stop_workspace.sh
+  - run: bash gateway/novnc-termux/scripts/start_workspace.sh

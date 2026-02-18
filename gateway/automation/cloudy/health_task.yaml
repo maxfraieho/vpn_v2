@@ -1,0 +1,4 @@
+name: healthcheck_workspace
+description: Healthcheck SwissWorkspaceGateway services
+steps:
+  - run: bash gateway/novnc-termux/scripts/healthcheck.sh
