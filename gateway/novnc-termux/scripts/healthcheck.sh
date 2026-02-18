@@ -110,13 +110,15 @@ check_single_workspace() {
     # ─── Log location check: per-workspace vs /root leak ─────────
     local ws_tigervnc_cfg="$base_dir/.config/tigervnc"
     local ws_log_found=false
-    for f in "$ws_tigervnc_cfg"/*":${display}.log" 2>/dev/null; do
+    shopt -s nullglob
+    for f in "$ws_tigervnc_cfg"/*":${display}.log"; do
         if [ -f "$f" ]; then
             ws_log_found=true
             hc_ok "TigerVNC log: $f (per-workspace, correct)"
             break
         fi
     done
+    shopt -u nullglob
     if [ "$ws_log_found" = false ]; then
         local root_log_found=false
         root_log_found=$(proot-distro login "$PROOT_DISTRO" --shared-tmp -- bash -c "
@@ -143,7 +145,8 @@ check_single_workspace() {
             echo "$vnc_errors" | sed 's/^/         /'
         fi
     fi
-    for f in "$ws_tigervnc_cfg"/*":${display}.log" 2>/dev/null; do
+    shopt -s nullglob
+    for f in "$ws_tigervnc_cfg"/*":${display}.log"; do
         if [ -f "$f" ]; then
             local session_errors
             session_errors=$(grep -iE "fatal|error|failed|abort" "$f" 2>/dev/null | tail -5 || true)
@@ -153,6 +156,7 @@ check_single_workspace() {
             fi
         fi
     done
+    shopt -u nullglob
     if [ -f "$log_dir/websockify.log" ]; then
         local ws_errors
         ws_errors=$(grep -iE "error|fatal|failed" "$log_dir/websockify.log" 2>/dev/null | tail -3 || true)
