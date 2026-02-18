@@ -47,12 +47,16 @@ log_info "Step 2/5: websockify will be installed inside Debian guest (step 4)...
 # ─── Step 3: PRoot Debian distro ────────────────────────────────
 log_info "Step 3/5: Setting up PRoot distro ($PROOT_DISTRO)..."
 
-if proot-distro list 2>/dev/null | grep -q "$PROOT_DISTRO"; then
-    log_ok "$PROOT_DISTRO already installed"
+if proot-distro login "$PROOT_DISTRO" -- true >/dev/null 2>&1; then
+    log_ok "$PROOT_DISTRO already installed — skipping install"
 else
     log_info "Installing $PROOT_DISTRO via proot-distro..."
-    proot-distro install "$PROOT_DISTRO"
-    log_ok "$PROOT_DISTRO installed"
+    if proot-distro install "$PROOT_DISTRO"; then
+        log_ok "$PROOT_DISTRO installed"
+    else
+        log_err "Failed to install $PROOT_DISTRO"
+        exit 1
+    fi
 fi
 
 # ─── Step 4: Debian guest packages ──────────────────────────────
