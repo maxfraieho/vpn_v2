@@ -1,5 +1,17 @@
-name: restart_workspace
-description: Restart SwissWorkspaceGateway services
+name: restart_gateway
+description: Stop and restart all SwissWorkspaceGateway workspaces
+
 steps:
-  - run: bash gateway/novnc-termux/scripts/stop_workspace.sh
-  - run: bash gateway/novnc-termux/scripts/start_workspace.sh
+  - name: stop_all
+    run: bash ~/gateway/novnc-termux/scripts/stop_workspace.sh all
+    timeout: 60
+
+  - name: start_all
+    run: bash ~/gateway/novnc-termux/scripts/start_workspace.sh all
+    timeout: 120
+    depends_on: stop_all
+
+  - name: verify
+    run: bash ~/gateway/novnc-termux/scripts/healthcheck.sh all
+    timeout: 30
+    depends_on: start_all

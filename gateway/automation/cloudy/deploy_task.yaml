@@ -1,5 +1,17 @@
-name: deploy_workspace
-description: Install and start SwissWorkspaceGateway on Termux
+name: deploy_gateway
+description: Install dependencies and start all SwissWorkspaceGateway workspaces
+
 steps:
-  - run: bash gateway/novnc-termux/scripts/install_termux.sh
-  - run: bash gateway/novnc-termux/scripts/start_workspace.sh
+  - name: install
+    run: bash ~/gateway/novnc-termux/scripts/install_termux.sh
+    timeout: 600
+
+  - name: start_all
+    run: bash ~/gateway/novnc-termux/scripts/start_workspace.sh all
+    timeout: 120
+    depends_on: install
+
+  - name: verify
+    run: bash ~/gateway/novnc-termux/scripts/healthcheck.sh all
+    timeout: 30
+    depends_on: start_all

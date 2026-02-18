@@ -37,6 +37,19 @@ Double-click the appropriate .bat file to launch Comet Browser with Swiss proxy:
 - **[SWISS_PROXY_README.md](SWISS_PROXY_README.md)** — Full deployment & usage guide
 - **[TERMUX_README.md](TERMUX_README.md)** — Termux-specific notes
 
+## Gateway — Remote Desktop Workspaces
+
+Web-based remote desktop access to isolated browser workspaces via noVNC over Tailscale.
+
+| Workspace | noVNC URL |
+|-----------|-----------|
+| A | `http://<TAILSCALE_IP>:6080/vnc.html` |
+| B | `http://<TAILSCALE_IP>:6081/vnc.html` |
+
+- **[Gateway README](gateway/novnc-termux/README.md)** — Quick start & runbook
+- **[Architecture](docs/ARCHITECTURE.md)** — ADR, component chain, port mapping
+- **[Security](docs/SECURITY.md)** — Threat model, Tailscale-only access
+
 ## Anti-leak Protection
 
 Swiss .bat files include flags to prevent geolocation detection:

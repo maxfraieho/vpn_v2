@@ -7,6 +7,12 @@
 # Configuration that might contain sensitive data
 config.json
 
+# Environment files with secrets
+gateway/novnc-termux/.env
+
+# noVNC vendor (cloned at install time)
+gateway/novnc-termux/vendor/
+
 # Tor data directory
 tor_data/
 

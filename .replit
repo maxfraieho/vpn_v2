@@ -1,1 +1,5 @@
 run = "bash -lc 'echo \"Repo vpn_v2 loaded. Use ./manager_v2.sh or gateway scripts.\" && ls -la'"
+
+[[ports]]
+localPort = 5000
+externalPort = 80

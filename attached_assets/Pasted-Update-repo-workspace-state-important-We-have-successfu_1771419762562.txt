@@ -1,0 +1,68 @@
+Update: repo + workspace state (important)
+
+We have successfully connected this Replit workspace to the GitHub repo:
+https://github.com/maxfraieho/vpn_v2.git
+
+What we did (repo manipulation summary):
+1) The Replit project initially was a clean fullstack JS template, not our repo.
+2) We removed the template git history and replaced the workspace contents with vpn_v2 from GitHub.
+3) We cleaned leftover template files using `git clean -fd` so the workspace is now a clean working copy of vpn_v2.
+4) Current git state: branch `master`, up to date with `origin/master`, working tree clean.
+5) We removed template artifacts (client/server/package.json/etc). This repo is now the PRIMARY codebase for the project.
+
+Why:
+We do NOT want to mix projects. We will fully evolve the existing vpn_v2 repo into SwissWorkspaceGateway.
+
+What we added (scaffold/stubs):
+We created a new scaffold to start SwissWorkspaceGateway development without Docker:
+
+- gateway/novnc-termux/
+  - scripts/
+    - install_termux.sh (stub)
+    - start_workspace.sh (stub)
+    - stop_workspace.sh (stub)
+    - healthcheck.sh (stub)
+  - https-wrapper/ (placeholder for optional Node.js HTTPS/auth wrapper)
+  - README.md (stub)
+
+- gateway/automation/cloudy/
+  - deploy_task.yaml (stub)
+  - restart_task.yaml (stub)
+  - health_task.yaml (stub)
+
+- docs/SECURITY.md (stub)
+
+We also added a minimal `.replit` to prevent “Run” failures (placeholder run command).
+
+Context constraints (must drive architecture):
+- Swiss host is a Samsung Android tablet running Termux (NOT Linux VPS).
+- No Docker, no systemd.
+- We can run: Node.js, Python, Bash in Termux.
+- Tailscale is available.
+- Cloudy CLI is installed on the Swiss Termux host and can execute scripts; we want to automate deploy/start/health/restart tasks through Cloudy + Claude agent.
+- Primary goal: legitimate remote workspace access (noVNC-like) to a desktop/browser session running on the Swiss host.
+- No anti-fraud / geo-circumvention / “anti-detect” features.
+
+What we need from you now:
+1) Confirm you see the repo files (manager_v2.sh, swiss_proxy_stream.py, swiss_socks5_proxy.py, TERMUX_README.md, etc.) and the new gateway/ scaffolding.
+2) Propose a clear, Termux-realistic architecture for SwissWorkspaceGateway:
+   - Choose the most feasible display/session approach on Android+Termux (e.g., Termux:X11 + lightweight WM + browser) and how VNC/noVNC fits.
+   - Define the runtime components and ports.
+   - Define how access is restricted (prefer Tailscale-only).
+   - Define what the Node https-wrapper is for (optional) and when we need it.
+3) Decide (after reviewing existing vpn_v2 code) whether SOCKS5 should play any role:
+   - keep separate,
+   - diagnostics only,
+   - or optional transport/fallback.
+   Do not assume; justify.
+4) Provide a concrete implementation plan with milestones:
+   - Phase 1 (MVP): get a working noVNC session from the Swiss Termux host, accessible over Tailscale.
+   - Phase 2 (hardening): auth, logs, rate-limits, safer defaults, clearer docs.
+   - Phase 3 (automation): Cloudy tasks that run idempotent scripts and report health.
+5) Most importantly: tell us exactly what you will implement next (specific files you will edit/create) and in what order, and why.
+
+Please respond with:
+- A text-based architecture diagram
+- Final folder structure (if you want to adjust the scaffold)
+- A prioritized TODO list (next 10–20 actions)
+- Any assumptions you need (clearly labeled)

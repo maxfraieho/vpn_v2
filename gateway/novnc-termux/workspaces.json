@@ -1,0 +1,37 @@
+{
+  "workspaces": [
+    {
+      "id": "a",
+      "enabled": true,
+      "label": "Workspace A",
+      "display": 1,
+      "vnc_port": 5901,
+      "novnc_port": 6080,
+      "geometry": "1280x720",
+      "depth": 24,
+      "bind_host": "127.0.0.1",
+      "base_dir": "$HOME/ws_a",
+      "profile_dir": "$HOME/ws_a/profile",
+      "log_dir": "$HOME/ws_a/logs",
+      "pid_dir": "$HOME/ws_a/run"
+    },
+    {
+      "id": "b",
+      "enabled": true,
+      "label": "Workspace B",
+      "display": 2,
+      "vnc_port": 5902,
+      "novnc_port": 6081,
+      "geometry": "1280x720",
+      "depth": 24,
+      "bind_host": "127.0.0.1",
+      "base_dir": "$HOME/ws_b",
+      "profile_dir": "$HOME/ws_b/profile",
+      "log_dir": "$HOME/ws_b/logs",
+      "pid_dir": "$HOME/ws_b/run"
+    }
+  ],
+  "novnc_dir": "$HOME/gateway/novnc-termux/vendor/noVNC",
+  "proot_distro": "debian",
+  "websockify_bind": "0.0.0.0"
+}

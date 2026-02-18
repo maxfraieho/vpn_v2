@@ -1,0 +1,20 @@
+#!/bin/bash
+unset SESSION_MANAGER
+unset DBUS_SESSION_BUS_ADDRESS
+
+export XDG_CONFIG_HOME="$HOME/ws_b/profile/.config"
+export XDG_DATA_HOME="$HOME/ws_b/profile/.local/share"
+export XDG_CACHE_HOME="$HOME/ws_b/profile/.cache"
+
+mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_CACHE_HOME"
+
+dbus-launch --exit-with-session xfce4-session &
+sleep 3
+
+chromium --no-sandbox --disable-gpu \
+  --user-data-dir="$HOME/ws_b/profile/chromium" \
+  --no-first-run \
+  --disable-features=TranslateUI \
+  &
+
+wait

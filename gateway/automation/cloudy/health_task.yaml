@@ -1,4 +1,17 @@
-name: healthcheck_workspace
-description: Healthcheck SwissWorkspaceGateway services
+name: healthcheck_gateway
+description: Verify all SwissWorkspaceGateway services are running
+
 steps:
-  - run: bash gateway/novnc-termux/scripts/healthcheck.sh
+  - name: check
+    run: bash ~/gateway/novnc-termux/scripts/healthcheck.sh all
+    timeout: 30
+
+on_failure:
+  - name: attempt_restart
+    run: bash ~/gateway/novnc-termux/scripts/start_workspace.sh all
+    timeout: 120
+
+  - name: recheck
+    run: bash ~/gateway/novnc-termux/scripts/healthcheck.sh all
+    timeout: 30
+    depends_on: attempt_restart

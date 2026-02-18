@@ -1,0 +1,78 @@
+✅ BUILD MODE — START IMPLEMENTATION NOW
+
+We have two research docs + finalized plan. MVP decision is locked:
+
+MVP = Approach B: PRoot-distro Debian on Termux host
+Reason: FHS-compatible apt packages → stable Chromium/Firefox; clean multi-workspace isolation.
+Pipeline: Termux host → proot Debian → TigerVNC (Xvnc) → websockify on Termux → noVNC → access via Tailscale.
+No Docker, no systemd. Multi-workspace is session isolation only (no anti-detection).
+
+PLEASE START CODING IMMEDIATELY.
+Implement Tasks 1–6 in this exact order and commit as you go (small commits per task).
+
+Task 1 — Architecture docs (create files)
+1) docs/ARCHITECTURE.md (ADR):
+   - why proot Debian
+   - components chain
+   - multi-workspace mapping:
+     A: display :1 / VNC 5901 (localhost) / noVNC 6080
+     B: display :2 / VNC 5902 (localhost) / noVNC 6081
+   - Android pitfalls: Phantom Process Killer, battery optimization, termux-wake-lock
+2) docs/SECURITY.md:
+   - Tailscale-only recommended
+   - VNC bound to localhost
+   - no secrets in git
+
+Task 2 — Config
+Create gateway/novnc-termux/workspaces.json with fields:
+id, enabled, display, vnc_port, novnc_port, base_dir, profile_dir, log_dir, pid_dir, bind_host (default 127.0.0.1)
+
+Task 3 — Termux scripts (idempotent, pid/log style similar to manager_v2.sh)
+Create/implement:
+- gateway/novnc-termux/scripts/install_termux.sh
+  - Termux: pkg install proot-distro python git (tailscale optional)
+  - proot-distro install debian (if missing)
+  - inside debian: apt install xfce4 chromium tigervnc-standalone-server dbus-x11
+  - clone noVNC to gateway/novnc-termux/vendor/novnc (or similar) if missing
+  - pip install websockify (Termux host side)
+- start_workspace.sh <id|all>
+  - create dirs per workspace (run/logs/profile)
+  - start vncserver/Xvnc with -localhost + set xstartup per workspace
+  - start chromium with per-workspace --user-data-dir
+  - start websockify for each workspace:
+      6080 -> 127.0.0.1:5901
+      6081 -> 127.0.0.1:5902
+  - write pid files + logs per workspace
+- stop_workspace.sh <id|all>
+  - graceful stop: vncserver -kill :N, kill websockify; cleanup pid files
+- healthcheck.sh <id|all>
+  - verify processes + ports; exit non-zero on failure; print concise status
+
+Task 4 — xstartup configs
+Add:
+- gateway/novnc-termux/configs/workspace_a/xstartup
+- gateway/novnc-termux/configs/workspace_b/xstartup
+They should start xfce4-session (or minimal WM) and then launch chromium with correct user-data-dir.
+
+Task 5 — Cloudy automation
+Create gateway/automation/cloudy:
+- deploy_task.yaml: install + start all
+- restart_task.yaml: stop all + start all
+- health_task.yaml: healthcheck all, return status
+
+Task 6 — README runbook
+Create gateway/novnc-termux/README.md:
+- Quick Start ≤15 commands
+- URLs via Tailscale:
+  http://<TAILSCALE_IP>:6080/vnc.html
+  http://<TAILSCALE_IP>:6081/vnc.html
+- Troubleshooting: Phantom Process Killer, wake-lock, dbus, chromium sandbox notes
+Update root README.md with a Gateway section linking to docs.
+
+DELIVER BACK AFTER TASK 3 (minimum MVP checkpoint):
+1) list of files created/changed
+2) exact Termux commands to run on Swiss tablet
+3) expected healthcheck output
+4) how to access workspace A/B via browser over Tailscale
+
+Start now with Task 1 and commit it, then proceed sequentially.
