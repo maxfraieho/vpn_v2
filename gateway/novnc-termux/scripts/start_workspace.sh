@@ -167,7 +167,7 @@ XEOF
         sleep 1
     fi
 
-    nohup run_in_debian \
+    nohup proot-distro login "$PROOT_DISTRO" --shared-tmp -- \
         websockify \
         --web="$NOVNC_DIR" \
         ${WEBSOCKIFY_BIND}:${novnc_port} \
