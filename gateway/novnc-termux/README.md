@@ -117,9 +117,10 @@ gateway/novnc-termux/
 │   └── workspace_b/xstartup    # XFCE4 + Chromium for workspace B
 ├── scripts/
 │   ├── install_termux.sh       # One-time setup (idempotent)
-│   ├── start_workspace.sh      # Start VNC + websockify
+│   ├── start_workspace.sh      # Start VNC + websockify (via Debian)
 │   ├── stop_workspace.sh       # Graceful shutdown
-│   └── healthcheck.sh          # Process + port verification
+│   ├── healthcheck.sh          # Process + port verification
+│   └── smoke_test.sh           # Automated smoke test (exit 0 = pass)
 ├── vendor/
 │   └── noVNC/                  # Cloned by installer
 ├── workspaces.json             # Workspace configuration
@@ -178,6 +179,19 @@ termux-wake-unlock
 Disable battery optimization for Termux in Android Settings:
 Settings > Apps > Termux > Battery > Unrestricted
 
+### websockify
+
+websockify is installed inside Debian (via `apt install websockify`) and runs via `proot-distro login debian -- websockify ...`. It is **not** installed on the Termux host (pip install fails due to numpy build issues on Android).
+
+To check if websockify is working inside Debian:
+```bash
+proot-distro login debian -- websockify --help
+# or
+proot-distro login debian -- python3 -m websockify --help
+```
+
+Note: `websockify --version` may not exist on some Debian builds. Use `--help` instead.
+
 ### Chromium Sandbox
 
 Chromium inside proot requires `--no-sandbox` (already set in xstartup configs). This is safe because:
@@ -194,6 +208,19 @@ Edit `workspaces.json` and change the `geometry` field, then restart:
 ```bash
 bash scripts/stop_workspace.sh all
 bash scripts/start_workspace.sh all
+```
+
+### websockify not found
+
+If websockify fails to start, verify it's installed inside Debian:
+```bash
+proot-distro login debian -- which websockify
+# Should output: /usr/bin/websockify
+```
+
+If missing, re-run the installer:
+```bash
+bash scripts/install_termux.sh
 ```
 
 ### Logs

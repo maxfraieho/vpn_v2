@@ -41,16 +41,8 @@ for p in "${TERMUX_PKGS[@]}"; do
     fi
 done
 
-# ─── Step 2: websockify (Termux host, via pip) ──────────────────
-log_info "Step 2/5: Installing websockify on Termux host..."
-
-if python3 -c "import websockify" 2>/dev/null; then
-    log_ok "websockify already installed"
-else
-    log_info "Installing websockify via pip..."
-    pip install websockify
-    log_ok "websockify installed"
-fi
+# ─── Step 2: (reserved — websockify installed in Debian guest below) ─
+log_info "Step 2/5: websockify will be installed inside Debian guest (step 4)..."
 
 # ─── Step 3: PRoot Debian distro ────────────────────────────────
 log_info "Step 3/5: Setting up PRoot distro ($PROOT_DISTRO)..."
@@ -66,7 +58,7 @@ fi
 # ─── Step 4: Debian guest packages ──────────────────────────────
 log_info "Step 4/5: Installing packages inside Debian guest..."
 
-DEBIAN_PKGS="xfce4 xfce4-terminal chromium tigervnc-standalone-server dbus-x11 procps"
+DEBIAN_PKGS="xfce4 xfce4-terminal chromium tigervnc-standalone-server dbus-x11 procps websockify python3-websockify"
 
 proot-distro login "$PROOT_DISTRO" -- bash -c "
     export DEBIAN_FRONTEND=noninteractive
@@ -74,7 +66,7 @@ proot-distro login "$PROOT_DISTRO" -- bash -c "
     apt-get install -y --no-install-recommends $DEBIAN_PKGS
     echo 'Guest packages installed.'
 "
-log_ok "Debian guest packages installed"
+log_ok "Debian guest packages installed (including websockify)"
 
 # ─── Step 5: Clone noVNC ────────────────────────────────────────
 log_info "Step 5/5: Setting up noVNC web client..."

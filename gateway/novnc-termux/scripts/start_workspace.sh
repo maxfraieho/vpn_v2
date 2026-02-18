@@ -130,8 +130,14 @@ XEOF
         fi
     fi
 
-    # ─── Start websockify on Termux host ─────────────────────────
-    log_info "Starting websockify ${WEBSOCKIFY_BIND}:$novnc_port -> ${bind_host}:$vnc_port..."
+    # ─── Start websockify via proot Debian ──────────────────────────
+    log_info "Starting websockify ${WEBSOCKIFY_BIND}:$novnc_port -> ${bind_host}:$vnc_port (via Debian)..."
+
+    if ! run_in_debian test -f "$NOVNC_DIR/vnc.html" 2>/dev/null; then
+        log_err "noVNC web dir not accessible inside Debian at $NOVNC_DIR"
+        log_err "Ensure noVNC is cloned and path is under \$HOME. Re-run install_termux.sh."
+        return 1
+    fi
 
     local old_ws_pid
     old_ws_pid=$(pgrep -f "websockify.*${novnc_port}" 2>/dev/null | head -1)
@@ -140,7 +146,8 @@ XEOF
         sleep 1
     fi
 
-    nohup websockify \
+    nohup run_in_debian \
+        websockify \
         --web="$NOVNC_DIR" \
         ${WEBSOCKIFY_BIND}:${novnc_port} \
         ${bind_host}:${vnc_port} \
@@ -148,9 +155,9 @@ XEOF
     local ws_new_pid=$!
     echo "$ws_new_pid" > "$ws_pid_file"
 
-    sleep 2
+    sleep 3
     if kill -0 "$ws_new_pid" 2>/dev/null; then
-        log_ok "websockify started (PID $ws_new_pid)"
+        log_ok "websockify started (PID $ws_new_pid, via Debian)"
     else
         log_err "websockify failed to start. Check $log_dir/websockify.log"
         return 1

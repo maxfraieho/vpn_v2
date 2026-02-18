@@ -100,6 +100,10 @@ for ws in cfg['workspaces']:
     echo "b"
 }
 
+run_in_debian() {
+    proot-distro login "$PROOT_DISTRO" --shared-tmp -- "$@"
+}
+
 check_pid_alive() {
     local pid_file="$1"
     if [ -f "$pid_file" ]; then

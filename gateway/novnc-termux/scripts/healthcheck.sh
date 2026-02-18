@@ -79,8 +79,15 @@ check_novnc_http() {
     local name="$2"
 
     if command -v curl &>/dev/null; then
-        if curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${port}/vnc.html" 2>/dev/null | grep -q "200"; then
-            echo -e "  ${GREEN}[ OK ]${NC} $name: HTTP 200 on port $port"
+        local http_code=""
+        if [ "$WEBSOCKIFY_BIND" != "__UNSET__" ] && [ "$WEBSOCKIFY_BIND" != "127.0.0.1" ]; then
+            http_code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 3 "http://${WEBSOCKIFY_BIND}:${port}/vnc.html" 2>/dev/null || true)
+        fi
+        if [ "$http_code" != "200" ] && [ "$http_code" != "302" ]; then
+            http_code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 3 "http://127.0.0.1:${port}/vnc.html" 2>/dev/null || true)
+        fi
+        if [ "$http_code" = "200" ] || [ "$http_code" = "302" ]; then
+            echo -e "  ${GREEN}[ OK ]${NC} $name: HTTP $http_code on port $port"
             return 0
         else
             echo -e "  ${YELLOW}[WARN]${NC} $name: HTTP check failed on port $port (port may still be ok)"

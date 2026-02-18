@@ -72,12 +72,11 @@ Expected output (abbreviated):
 [OK] proot-distro already installed
 [OK] python already installed
 [OK] git already installed
-[INFO] Step 2/5: Installing websockify on Termux host...
-[OK] websockify already installed
+[INFO] Step 2/5: websockify will be installed inside Debian guest (step 4)...
 [INFO] Step 3/5: Setting up PRoot distro (debian)...
 [OK] debian already installed
 [INFO] Step 4/5: Installing packages inside Debian guest...
-[OK] Debian guest packages installed
+[OK] Debian guest packages installed (including websockify)
 [INFO] Step 5/5: Setting up noVNC web client...
 [OK] noVNC already cloned at /data/.../vendor/noVNC
 [INFO] Creating workspace directories...
@@ -138,16 +137,16 @@ Expected output:
 [INFO] VNC security: VncAuth (password required)
 [INFO] Starting Xvnc :1 on 127.0.0.1:5901...
 [OK] Xvnc :1 started (PID 12345)
-[INFO] Starting websockify 100.100.74.9:6080 -> 127.0.0.1:5901...
-[OK] websockify started (PID 12346)
+[INFO] Starting websockify 100.100.74.9:6080 -> 127.0.0.1:5901 (via Debian)...
+[OK] websockify started (PID 12346, via Debian)
 [OK] Workspace A ready: http://100.100.74.9:6080/vnc.html
 
 [INFO] Starting Workspace B (display :2, VNC 5902, noVNC 6081)
 [INFO] VNC security: VncAuth (password required)
 [INFO] Starting Xvnc :2 on 127.0.0.1:5902...
 [OK] Xvnc :2 started (PID 12347)
-[INFO] Starting websockify 100.100.74.9:6081 -> 127.0.0.1:5902...
-[OK] websockify started (PID 12348)
+[INFO] Starting websockify 100.100.74.9:6081 -> 127.0.0.1:5902 (via Debian)...
+[OK] websockify started (PID 12348, via Debian)
 [OK] Workspace B ready: http://100.100.74.9:6081/vnc.html
 
 =======================================
@@ -398,8 +397,19 @@ cat ~/ws_a/logs/websockify.log
 
 Common issues:
 - `Address already in use` → Kill orphan: `pkill -f 'websockify.*6080'`
-- `No module named websockify` → Run `pip install websockify`
+- `websockify: command not found` → Re-run `bash scripts/install_termux.sh` (installs websockify inside Debian)
 - `noVNC directory not found` → Re-run `install_termux.sh`
+
+Verify websockify is available inside Debian:
+```bash
+proot-distro login debian -- websockify --help
+# or
+proot-distro login debian -- python3 -m websockify --help
+```
+
+Note: `websockify --version` may not exist on some Debian builds. Use `--help` instead.
+
+**Important:** websockify is NOT installed on the Termux host (pip install fails due to numpy build issues on Android). It runs inside proot Debian via `proot-distro login debian -- websockify ...`.
 
 ### Processes killed by Android
 
