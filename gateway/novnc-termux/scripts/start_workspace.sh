@@ -55,7 +55,13 @@ start_single_workspace() {
 #!/bin/bash
 unset SESSION_MANAGER
 unset DBUS_SESSION_BUS_ADDRESS
-dbus-launch --exit-with-session xfce4-session &
+
+export XDG_RUNTIME_DIR=/tmp/runtime-$USER
+mkdir -p "$XDG_RUNTIME_DIR"
+
+openbox &
+xterm &
+
 wait
 XEOF
         chmod +x "$xstartup"
@@ -126,25 +132,34 @@ XEOF
         done
 
         if [ "$vnc_up" = true ]; then
-            local vnc_pid
-            vnc_pid=$(pgrep -f "Xvnc.*:${display}" 2>/dev/null | head -1)
-            if [ -n "$vnc_pid" ]; then
-                echo "$vnc_pid" > "$vnc_pid_file"
-                log_ok "Xvnc :$display started (PID $vnc_pid)"
-            else
-                log_ok "Xvnc :$display listening on port $vnc_port (PID not captured via pgrep)"
-            fi
+            log_ok "Xvnc :$display listening on port $vnc_port"
         else
-            local vnc_pid
-            vnc_pid=$(pgrep -f "Xvnc.*:${display}" 2>/dev/null | head -1)
-            if [ -n "$vnc_pid" ]; then
-                echo "$vnc_pid" > "$vnc_pid_file"
-                log_ok "Xvnc :$display started (PID $vnc_pid, nc check skipped)"
-            else
-                log_err "Failed to start Xvnc :$display. Check $log_dir/vnc.log"
-                return 1
-            fi
+            log_err "Failed to start Xvnc :$display (port $vnc_port not responding after 20s)"
+            log_err "--- vnc.log (last 50 lines) ---"
+            tail -50 "$log_dir/vnc.log" 2>/dev/null | sed 's/^/  /' || true
+            log_err "--- TigerVNC session logs ---"
+            proot-distro login "$PROOT_DISTRO" --shared-tmp -- bash -c "
+                for f in \$HOME/.config/tigervnc/*:${display}.log; do
+                    [ -f \"\$f\" ] && echo \"=== \$f ===\" && tail -200 \"\$f\"
+                done
+            " 2>/dev/null | sed 's/^/  /' || true
+            return 1
         fi
+
+        sleep 2
+        if ! proot-distro login "$PROOT_DISTRO" --shared-tmp -- nc -z 127.0.0.1 "$vnc_port" 2>/dev/null; then
+            log_err "Xvnc :$display exited shortly after start (port $vnc_port gone)"
+            log_err "--- vnc.log (last 50 lines) ---"
+            tail -50 "$log_dir/vnc.log" 2>/dev/null | sed 's/^/  /' || true
+            log_err "--- TigerVNC session logs ---"
+            proot-distro login "$PROOT_DISTRO" --shared-tmp -- bash -c "
+                for f in \$HOME/.config/tigervnc/*:${display}.log; do
+                    [ -f \"\$f\" ] && echo \"=== \$f ===\" && tail -200 \"\$f\"
+                done
+            " 2>/dev/null | sed 's/^/  /' || true
+            return 1
+        fi
+        log_ok "Xvnc :$display stable (port $vnc_port still responding after 2s)"
     fi
 
     # ─── Start websockify via proot Debian ──────────────────────────
