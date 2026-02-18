@@ -31,30 +31,31 @@ check_single_workspace() {
     read -r display vnc_port novnc_port geometry depth base_dir bind_host <<< "$config"
 
     local pid_dir="$base_dir/run"
-    local vnc_pid_file="$pid_dir/vnc.pid"
     local ws_pid_file="$pid_dir/websockify.pid"
     local log_dir="$base_dir/logs"
 
     echo ""
     echo -e "${BLUE}--- Workspace ${ws_id^^} (display :$display) ---${NC}"
 
-    # ─── VNC process check ───────────────────────────────────────
-    if check_pid_alive "$vnc_pid_file"; then
-        local vnc_pid
-        vnc_pid=$(cat "$vnc_pid_file")
-        hc_ok "Xvnc :$display: running (PID $vnc_pid)"
+    # ─── VNC check: Debian-side nc + ps (NOT host pgrep/ss) ──────
+    local vnc_up=false
+    if proot-distro login "$PROOT_DISTRO" --shared-tmp -- nc -z 127.0.0.1 "$vnc_port" 2>/dev/null; then
+        vnc_up=true
+        hc_ok "Xvnc :$display: port $vnc_port listening (Debian-side nc)"
     else
-        local vnc_pid
-        vnc_pid=$(pgrep -f "Xvnc.*:${display}" 2>/dev/null | head -1)
-        if [ -n "$vnc_pid" ]; then
-            hc_ok "Xvnc :$display: running (PID $vnc_pid, no pidfile)"
+        local deb_ps
+        deb_ps=$(proot-distro login "$PROOT_DISTRO" --shared-tmp -- bash -c \
+            "ps -ef 2>/dev/null | grep -E 'Xtigervnc.*:${display}|Xvnc.*:${display}' | grep -v grep" 2>/dev/null || true)
+        if [ -n "$deb_ps" ]; then
+            vnc_up=true
+            hc_ok "Xvnc :$display: process found inside Debian (port not yet responding)"
         else
-            hc_fail "Xvnc :$display: not running"
+            hc_fail "Xvnc :$display: not running (no port, no process inside Debian)"
         fi
     fi
 
-    # ─── VNC port check (Debian-side nc — no ss) ─────────────────
-    if run_in_debian nc -z 127.0.0.1 "$vnc_port" 2>/dev/null; then
+    # ─── VNC port (redundant with above but keeps output consistent) ─
+    if [ "$vnc_up" = true ]; then
         hc_ok "VNC port: port $vnc_port listening"
     else
         hc_fail "VNC port: port $vnc_port not listening"
@@ -67,7 +68,7 @@ check_single_workspace() {
         hc_ok "websockify: running (PID $ws_pid)"
     else
         local ws_pid
-        ws_pid=$(pgrep -f "websockify.*${novnc_port}" 2>/dev/null | head -1)
+        ws_pid=$(pgrep -f "websockify.*${novnc_port}" 2>/dev/null | head -1 || true)
         if [ -n "$ws_pid" ]; then
             hc_ok "websockify: running (PID $ws_pid, no pidfile)"
         else
@@ -75,12 +76,12 @@ check_single_workspace() {
         fi
     fi
 
-    # ─── noVNC port check (Debian-side nc — no ss) ───────────────
-    local novnc_check_host="$WEBSOCKIFY_BIND"
+    # ─── noVNC port check (Debian-side nc) ────────────────────────
+    local novnc_check_host="${WEBSOCKIFY_BIND:-127.0.0.1}"
     if [ "$novnc_check_host" = "__UNSET__" ] || [ "$novnc_check_host" = "0.0.0.0" ]; then
         novnc_check_host="127.0.0.1"
     fi
-    if run_in_debian nc -z "$novnc_check_host" "$novnc_port" 2>/dev/null; then
+    if proot-distro login "$PROOT_DISTRO" --shared-tmp -- nc -z "$novnc_check_host" "$novnc_port" 2>/dev/null; then
         hc_ok "noVNC port: port $novnc_port listening"
     else
         hc_fail "noVNC port: port $novnc_port not listening"
@@ -89,7 +90,7 @@ check_single_workspace() {
     # ─── noVNC HTTP check (via Debian curl/wget) ─────────────────
     local http_url="http://${novnc_check_host}:${novnc_port}/vnc.html"
     local http_code
-    http_code=$(run_in_debian bash -c "
+    http_code=$(proot-distro login "$PROOT_DISTRO" --shared-tmp -- bash -c "
         if command -v curl &>/dev/null; then
             curl -s -o /dev/null -w '%{http_code}' --connect-timeout 3 '$http_url' 2>/dev/null
         elif command -v wget &>/dev/null; then
@@ -97,7 +98,7 @@ check_single_workspace() {
         else
             echo 'nocurl'
         fi
-    " 2>/dev/null)
+    " 2>/dev/null || echo "error")
     if [ "$http_code" = "200" ] || [ "$http_code" = "302" ]; then
         hc_ok "noVNC HTTP: HTTP $http_code on port $novnc_port"
     elif [ "$http_code" = "nocurl" ]; then
@@ -109,7 +110,7 @@ check_single_workspace() {
     # ─── Log warnings (non-fatal) ────────────────────────────────
     if [ -f "$log_dir/vnc.log" ]; then
         local vnc_errors
-        vnc_errors=$(grep -iE "fatal|failed to start|password.*not found" "$log_dir/vnc.log" 2>/dev/null | tail -3)
+        vnc_errors=$(grep -iE "fatal|failed to start|password.*not found" "$log_dir/vnc.log" 2>/dev/null | tail -3 || true)
         if [ -n "$vnc_errors" ]; then
             hc_warn "Recent VNC log errors:"
             echo "$vnc_errors" | sed 's/^/         /'
@@ -117,7 +118,7 @@ check_single_workspace() {
     fi
     if [ -f "$log_dir/websockify.log" ]; then
         local ws_errors
-        ws_errors=$(grep -iE "error|fatal|failed" "$log_dir/websockify.log" 2>/dev/null | tail -3)
+        ws_errors=$(grep -iE "error|fatal|failed" "$log_dir/websockify.log" 2>/dev/null | tail -3 || true)
         if [ -n "$ws_errors" ]; then
             hc_warn "Recent websockify log errors:"
             echo "$ws_errors" | sed 's/^/         /'
@@ -143,7 +144,11 @@ if command -v tailscale &>/dev/null; then
         hc_warn "Tailscale: not connected"
     fi
 else
-    hc_warn "Tailscale: not installed"
+    if [ "${WEBSOCKIFY_BIND:-__UNSET__}" != "__UNSET__" ]; then
+        hc_cfg "Tailscale CLI: not installed (WEBSOCKIFY_BIND=$WEBSOCKIFY_BIND from .env)"
+    else
+        hc_warn "Tailscale: not installed and WEBSOCKIFY_BIND not set"
+    fi
 fi
 
 if command -v termux-wake-lock &>/dev/null; then
@@ -152,8 +157,8 @@ else
     hc_warn "termux-wake-lock: not available (processes may be killed)"
 fi
 
-hc_cfg "VNC security: $VNC_SECURITY"
-hc_cfg "websockify bind: $WEBSOCKIFY_BIND"
+hc_cfg "VNC security: ${VNC_SECURITY:-VncAuth}"
+hc_cfg "websockify bind: ${WEBSOCKIFY_BIND:-__UNSET__}"
 hc_cfg "Config: $CONFIG_FILE"
 
 case "$TARGET" in

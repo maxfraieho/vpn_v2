@@ -16,7 +16,7 @@ echo ""
 
 # ─── 0. Check bind safety ───────────────────────────────────────
 log_info "Checking websockify bind configuration..."
-if [ "$WEBSOCKIFY_BIND" = "__UNSET__" ]; then
+if [ "${WEBSOCKIFY_BIND:-__UNSET__}" = "__UNSET__" ]; then
     fail "WEBSOCKIFY_BIND unresolved (Tailscale not detected, .env not set)"
 elif [ "$WEBSOCKIFY_BIND" = "0.0.0.0" ]; then
     echo -e "  ${YELLOW}[WARN]${NC} WEBSOCKIFY_BIND=0.0.0.0 — websockify listens on ALL interfaces"
@@ -41,7 +41,7 @@ while IFS= read -r ws_id; do
     config=$(get_ws_config "$ws_id")
     read -r display vnc_port novnc_port geometry depth base_dir bind_host <<< "$config"
 
-    if run_in_debian nc -z 127.0.0.1 "$vnc_port" 2>/dev/null; then
+    if proot-distro login "$PROOT_DISTRO" --shared-tmp -- nc -z 127.0.0.1 "$vnc_port" 2>/dev/null; then
         pass "VNC :$vnc_port reachable on 127.0.0.1 (localhost)"
     else
         fail "VNC :$vnc_port not listening on 127.0.0.1"
@@ -56,7 +56,7 @@ while IFS= read -r ws_id; do
     config=$(get_ws_config "$ws_id")
     read -r display vnc_port novnc_port geometry depth base_dir bind_host <<< "$config"
 
-    if run_in_debian bash -c "
+    if proot-distro login "$PROOT_DISTRO" --shared-tmp -- bash -c "
         nc -z 0.0.0.0 $vnc_port 2>/dev/null && \
         ! nc -z 127.0.0.1 $vnc_port 2>/dev/null
     " 2>/dev/null; then
@@ -70,27 +70,32 @@ done < <(get_all_ws_ids)
 echo ""
 log_info "Verifying noVNC HTTP endpoints..."
 
+novnc_check_host="${WEBSOCKIFY_BIND:-127.0.0.1}"
+if [ "$novnc_check_host" = "__UNSET__" ] || [ "$novnc_check_host" = "0.0.0.0" ]; then
+    novnc_check_host="127.0.0.1"
+fi
+
 while IFS= read -r ws_id; do
     config=$(get_ws_config "$ws_id")
     read -r display vnc_port novnc_port geometry depth base_dir bind_host <<< "$config"
 
-    local_url="http://${WEBSOCKIFY_BIND}:${novnc_port}/vnc.html"
+    check_url="http://${novnc_check_host}:${novnc_port}/vnc.html"
     fallback_url="http://127.0.0.1:${novnc_port}/vnc.html"
 
     http_code=""
-    http_code=$(run_in_debian bash -c "
+    http_code=$(proot-distro login "$PROOT_DISTRO" --shared-tmp -- bash -c "
         if command -v curl &>/dev/null; then
-            code=\$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 3 '$local_url' 2>/dev/null)
+            code=\$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 3 '$check_url' 2>/dev/null)
             if [ \"\$code\" != '200' ] && [ \"\$code\" != '302' ]; then
                 code=\$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 3 '$fallback_url' 2>/dev/null)
             fi
             echo \"\$code\"
         elif command -v wget &>/dev/null; then
-            wget -q --spider -S '$local_url' 2>&1 | grep 'HTTP/' | tail -1 | awk '{print \$2}'
+            wget -q --spider -S '$check_url' 2>&1 | grep 'HTTP/' | tail -1 | awk '{print \$2}'
         else
             echo 'nocurl'
         fi
-    " 2>/dev/null)
+    " 2>/dev/null || echo "error")
 
     if [ "$http_code" = "200" ] || [ "$http_code" = "302" ]; then
         pass "noVNC port $novnc_port: HTTP $http_code"
@@ -111,11 +116,7 @@ while IFS= read -r ws_id; do
     config=$(get_ws_config "$ws_id")
     read -r display vnc_port novnc_port geometry depth base_dir bind_host <<< "$config"
 
-    local novnc_check_host="$WEBSOCKIFY_BIND"
-    if [ "$novnc_check_host" = "__UNSET__" ] || [ "$novnc_check_host" = "0.0.0.0" ]; then
-        novnc_check_host="127.0.0.1"
-    fi
-    if run_in_debian nc -z "$novnc_check_host" "$novnc_port" 2>/dev/null; then
+    if proot-distro login "$PROOT_DISTRO" --shared-tmp -- nc -z "$novnc_check_host" "$novnc_port" 2>/dev/null; then
         pass "websockify :$novnc_port reachable on $novnc_check_host"
     else
         fail "websockify :$novnc_port not reachable on $novnc_check_host"
