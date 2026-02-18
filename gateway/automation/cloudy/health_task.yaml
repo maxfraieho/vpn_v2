@@ -1,10 +1,15 @@
 name: healthcheck_gateway
-description: Verify all SwissWorkspaceGateway services are running
+description: Verify all SwissWorkspaceGateway services are running and pass smoke test
 
 steps:
-  - name: check
+  - name: healthcheck
     run: bash ~/gateway/novnc-termux/scripts/healthcheck.sh all
     timeout: 30
+
+  - name: smoke_test
+    run: bash ~/gateway/novnc-termux/scripts/smoke_test.sh
+    timeout: 30
+    depends_on: healthcheck
 
 on_failure:
   - name: attempt_restart
@@ -15,3 +20,8 @@ on_failure:
     run: bash ~/gateway/novnc-termux/scripts/healthcheck.sh all
     timeout: 30
     depends_on: attempt_restart
+
+  - name: recheck_smoke
+    run: bash ~/gateway/novnc-termux/scripts/smoke_test.sh
+    timeout: 30
+    depends_on: recheck

@@ -1,5 +1,5 @@
 name: deploy_gateway
-description: Install dependencies and start all SwissWorkspaceGateway workspaces
+description: Install dependencies, start all workspaces, and run smoke test
 
 steps:
   - name: install
@@ -11,7 +11,12 @@ steps:
     timeout: 120
     depends_on: install
 
-  - name: verify
+  - name: healthcheck
     run: bash ~/gateway/novnc-termux/scripts/healthcheck.sh all
     timeout: 30
     depends_on: start_all
+
+  - name: smoke_test
+    run: bash ~/gateway/novnc-termux/scripts/smoke_test.sh
+    timeout: 30
+    depends_on: healthcheck

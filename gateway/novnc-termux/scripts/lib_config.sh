@@ -13,8 +13,19 @@ fi
 
 PROOT_DISTRO="${PROOT_DISTRO:-debian}"
 NOVNC_DIR="${NOVNC_DIR:-$GATEWAY_DIR/vendor/noVNC}"
-WEBSOCKIFY_BIND="${WEBSOCKIFY_BIND:-0.0.0.0}"
 VNC_SECURITY="${VNC_SECURITY:-VncAuth}"
+
+if [ -z "${WEBSOCKIFY_BIND:-}" ]; then
+    if command -v tailscale &>/dev/null; then
+        _ts_ip=$(tailscale ip -4 2>/dev/null | head -1)
+        if [ -n "$_ts_ip" ]; then
+            WEBSOCKIFY_BIND="$_ts_ip"
+        fi
+    fi
+    if [ -z "${WEBSOCKIFY_BIND:-}" ]; then
+        WEBSOCKIFY_BIND="__UNSET__"
+    fi
+fi
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'

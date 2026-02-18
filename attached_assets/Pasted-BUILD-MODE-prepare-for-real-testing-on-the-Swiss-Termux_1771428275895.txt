@@ -1,0 +1,52 @@
+BUILD MODE — prepare for real testing on the Swiss Termux host (Tailscale IP = 100.100.74.9)
+
+You have already implemented Tasks 1–6. Now we need a “testing & hardening pass” so we can run this on the real Swiss tablet and verify A/B workspaces.
+
+Constraints:
+- Termux on Android (no Docker, no systemd).
+- Access via Tailscale only.
+- VNC must bind to localhost (127.0.0.1) and require VncAuth (password).
+- noVNC/websockify must be reachable on the tablet Tailscale IP (100.100.74.9) for ports 6080/6081.
+- No anti-detection/fingerprint spoofing features.
+
+TASK A — Add a dedicated TEST RUNBOOK + expected outputs
+1) Create `gateway/novnc-termux/TESTING.md` with:
+   - Exact commands to run on the Swiss tablet
+   - Expected outputs for each step (examples)
+   - Verification URLs:
+     Workspace A: http://100.100.74.9:6080/vnc.html
+     Workspace B: http://100.100.74.9:6081/vnc.html
+   - Isolation test: A and B must NOT share cookies (separate chromium user-data-dir)
+
+Include these checks:
+- `tailscale status` / `tailscale ip -4`
+- `ss -ltnp | grep -E '5901|5902|6080|6081'`
+- `curl -I http://127.0.0.1:6080/vnc.html` (on tablet)
+- `curl -I http://100.100.74.9:6080/vnc.html` (from another tailnet device)
+
+TASK B — Make bind behavior safe by default
+2) Ensure VNC always binds to localhost:
+   - Start VNC with `-localhost` and confirm ports 5901/5902 listen only on 127.0.0.1
+3) Ensure websockify binds to Tailscale IP by default (not 0.0.0.0):
+   - If `.env` doesn’t set `WEBSOCKIFY_BIND`, detect the tablet tailscale IPv4 and bind to it
+   - Fallback: 0.0.0.0 only if explicitly configured
+
+TASK C — Add a single “smoke test” command
+4) Add `gateway/novnc-termux/scripts/smoke_test.sh` that:
+   - runs healthcheck for all workspaces
+   - verifies vnc ports are localhost-only
+   - verifies novnc endpoints respond with HTTP 200/302
+   - exits non-zero if any check fails
+
+TASK D — Improve Cloudy automation for testing
+5) Update Cloudy tasks so we can run:
+   - deploy_task.yaml → install + start all + smoke_test
+   - health_task.yaml → healthcheck + smoke_test summary
+
+TASK E — Report back clearly
+After you implement A–D, respond with:
+1) File list changed/created
+2) The exact step-by-step commands we should run on the Swiss tablet to test
+3) The expected success criteria (“Done when”)
+
+Start now by implementing TASK A (TESTING.md) and TASK B (safe default binds), then commit.

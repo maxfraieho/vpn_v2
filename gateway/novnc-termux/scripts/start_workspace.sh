@@ -171,6 +171,15 @@ echo -e "${BLUE}=======================================${NC}"
 echo -e "${BLUE} SwissWorkspaceGateway — Start${NC}"
 echo -e "${BLUE}=======================================${NC}"
 
+if [ "$WEBSOCKIFY_BIND" = "__UNSET__" ]; then
+    log_err "Cannot determine websockify bind address."
+    log_err "Tailscale IP not detected and WEBSOCKIFY_BIND not set in .env."
+    log_err "Fix: set WEBSOCKIFY_BIND in gateway/novnc-termux/.env"
+    log_err "  e.g. WEBSOCKIFY_BIND=100.100.74.9  (Tailscale IP, recommended)"
+    log_err "  or   WEBSOCKIFY_BIND=0.0.0.0       (all interfaces, less secure)"
+    exit 1
+fi
+
 if command -v termux-wake-lock &>/dev/null; then
     termux-wake-lock 2>/dev/null || true
     log_info "Wake lock acquired"
