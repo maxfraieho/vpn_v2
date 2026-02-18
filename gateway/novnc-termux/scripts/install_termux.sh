@@ -62,7 +62,7 @@ fi
 # ─── Step 4: Debian guest packages ──────────────────────────────
 log_info "Step 4/5: Installing packages inside Debian guest..."
 
-DEBIAN_PKGS="openbox xterm chromium tigervnc-standalone-server procps websockify python3-websockify netcat-openbsd"
+DEBIAN_PKGS="openbox xterm firefox-esr chromium tigervnc-standalone-server procps websockify python3-websockify netcat-openbsd"
 
 proot-distro login "$PROOT_DISTRO" -- bash -c "
     export DEBIAN_FRONTEND=noninteractive

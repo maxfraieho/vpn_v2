@@ -13,13 +13,4 @@ mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_CACHE_HOME"
 openbox &
 xterm &
 
-if [ "${START_BROWSER:-0}" = "1" ]; then
-    mkdir -p "$HOME/profile/chromium"
-    chromium --no-sandbox --disable-gpu \
-      --user-data-dir="$HOME/profile/chromium" \
-      --no-first-run \
-      --disable-features=TranslateUI \
-      &
-fi
-
 wait

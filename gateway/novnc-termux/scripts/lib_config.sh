@@ -15,6 +15,8 @@ PROOT_DISTRO="${PROOT_DISTRO:-debian}"
 NOVNC_DIR="${NOVNC_DIR:-$GATEWAY_DIR/vendor/noVNC}"
 VNC_SECURITY="${VNC_SECURITY:-VncAuth}"
 START_BROWSER="${START_BROWSER:-0}"
+BROWSER="${BROWSER:-firefox}"
+START_URL="${START_URL:-about:blank}"
 
 if [ -z "${WEBSOCKIFY_BIND:-}" ]; then
     if command -v tailscale &>/dev/null; then

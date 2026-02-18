@@ -16,6 +16,48 @@ usage() {
     exit 1
 }
 
+_dump_crash_attribution() {
+    local tigervnc_cfg="$1"
+    local display="$2"
+    local log_dir="$3"
+    local xstartup_path="$4"
+
+    log_err "=== CRASH ATTRIBUTION ==="
+    log_err "START_BROWSER=$START_BROWSER, BROWSER=$BROWSER"
+
+    log_err "--- xstartup content ($xstartup_path) ---"
+    if [ -f "$xstartup_path" ]; then
+        cat "$xstartup_path" 2>/dev/null | sed 's/^/  /' || true
+    else
+        echo "  (file not found)" || true
+    fi
+
+    log_err "--- vnc.log (last 80 lines) ---"
+    tail -80 "$log_dir/vnc.log" 2>/dev/null | sed 's/^/  /' || true
+
+    log_err "--- Workspace TigerVNC session logs ($tigervnc_cfg) ---"
+    shopt -s nullglob
+    for f in "$tigervnc_cfg"/*":${display}.log"; do
+        [ -f "$f" ] && echo "=== $f ===" && tail -80 "$f" | sed 's/^/  /'
+    done
+    shopt -u nullglob
+
+    log_err "--- /root TigerVNC logs (HOME leak check) ---"
+    proot-distro login "$PROOT_DISTRO" --shared-tmp -- bash -c "
+        shopt -s nullglob
+        for f in /root/.config/tigervnc/*:${display}.log; do
+            [ -f \"\$f\" ] && echo \"=== \$f (HOME leaked to /root!) ===\" && tail -80 \"\$f\"
+        done
+        shopt -u nullglob
+    " 2>/dev/null | sed 's/^/  /' || true
+
+    local dbus_lines
+    dbus_lines=$(grep -ciE "dbus|udev|netlink|bus_socket" "$log_dir/vnc.log" 2>/dev/null || echo "0")
+    if [ "$dbus_lines" -gt 0 ]; then
+        log_warn "dbus/udev/netlink errors found ($dbus_lines lines) — these are common in proot and may have caused VNC exit"
+    fi
+}
+
 start_single_workspace() {
     local ws_id="$1"
     local config
@@ -84,36 +126,29 @@ XEOF
         log_info "VNC security: VncAuth (password required)"
     fi
 
-    local start_browser="${START_BROWSER:-0}"
-
     # ─── Start VNC server inside proot Debian ────────────────────
     if ! check_pid_alive "$vnc_pid_file"; then
         log_info "Starting Xvnc :$display on ${bind_host}:$vnc_port (HOME=$base_dir)..."
+        log_info "START_BROWSER=$START_BROWSER, BROWSER=$BROWSER"
 
         proot-distro login "$PROOT_DISTRO" --shared-tmp -- bash -c "
-            # Force HOME to workspace base_dir for full isolation
             export HOME='$base_dir'
             export USER=\"\$(whoami)\"
             export XDG_CONFIG_HOME=\"\$HOME/.config\"
             export XDG_DATA_HOME=\"\$HOME/.local/share\"
             export XDG_CACHE_HOME=\"\$HOME/.cache\"
             export XDG_RUNTIME_DIR=\"\$HOME/.run\"
-            export START_BROWSER='$start_browser'
 
             TIGERVNC_CFG=\"\$HOME/.config/tigervnc\"
 
-            # Preflight: clean stale X locks/sockets for this display
             rm -f /tmp/.X${display}-lock
             rm -f /tmp/.X11-unix/X${display}
 
-            # Clean stale TigerVNC pid/log for this display
             rm -f \"\$TIGERVNC_CFG/\"*\":${display}.pid\" 2>/dev/null
             rm -f \"\$TIGERVNC_CFG/\"*\":${display}.log\" 2>/dev/null
 
-            # Ensure dirs exist
             mkdir -p \"\$TIGERVNC_CFG\" \"\$XDG_RUNTIME_DIR\" \"\$XDG_DATA_HOME\" \"\$XDG_CACHE_HOME\"
 
-            # Migrate legacy passwd from /root if needed
             if [ ! -f \"\$TIGERVNC_CFG/passwd\" ]; then
                 if [ -f /root/.config/tigervnc/passwd ]; then
                     cp /root/.config/tigervnc/passwd \"\$TIGERVNC_CFG/passwd\"
@@ -148,43 +183,27 @@ XEOF
             fi
         done
 
-        if [ "$vnc_up" = true ]; then
-            log_ok "Xvnc :$display listening on port $vnc_port"
-        else
+        if [ "$vnc_up" != true ]; then
             log_err "Failed to start Xvnc :$display (port $vnc_port not responding after 20s)"
-            log_err "--- vnc.log (last 50 lines) ---"
-            tail -50 "$log_dir/vnc.log" 2>/dev/null | sed 's/^/  /' || true
-            log_err "--- Workspace TigerVNC logs ($ws_tigervnc_cfg) ---"
-            for f in "$ws_tigervnc_cfg"/*":${display}.log"; do
-                [ -f "$f" ] && echo "=== $f ===" && tail -200 "$f" | sed 's/^/  /'
-            done 2>/dev/null || true
-            log_err "--- /root TigerVNC logs (HOME leak check) ---"
-            proot-distro login "$PROOT_DISTRO" --shared-tmp -- bash -c "
-                for f in /root/.config/tigervnc/*:${display}.log; do
-                    [ -f \"\$f\" ] && echo '=== \$f (HOME leaked to /root!) ===' && tail -200 \"\$f\"
-                done
-            " 2>/dev/null | sed 's/^/  /' || true
+            _dump_crash_attribution "$ws_tigervnc_cfg" "$display" "$log_dir" "$xstartup"
+            return 1
+        fi
+        log_ok "Xvnc :$display listening on port $vnc_port"
+
+        sleep 3
+        if ! proot-distro login "$PROOT_DISTRO" --shared-tmp -- nc -z 127.0.0.1 "$vnc_port" 2>/dev/null; then
+            log_err "Xvnc :$display exited shortly after start (port $vnc_port gone after 3s)"
+            _dump_crash_attribution "$ws_tigervnc_cfg" "$display" "$log_dir" "$xstartup"
             return 1
         fi
 
-        sleep 2
-        if ! proot-distro login "$PROOT_DISTRO" --shared-tmp -- nc -z 127.0.0.1 "$vnc_port" 2>/dev/null; then
-            log_err "Xvnc :$display exited shortly after start (port $vnc_port gone)"
-            log_err "--- vnc.log (last 50 lines) ---"
-            tail -50 "$log_dir/vnc.log" 2>/dev/null | sed 's/^/  /' || true
-            log_err "--- Workspace TigerVNC logs ($ws_tigervnc_cfg) ---"
-            for f in "$ws_tigervnc_cfg"/*":${display}.log"; do
-                [ -f "$f" ] && echo "=== $f ===" && tail -200 "$f" | sed 's/^/  /'
-            done 2>/dev/null || true
-            log_err "--- /root TigerVNC logs (HOME leak check) ---"
-            proot-distro login "$PROOT_DISTRO" --shared-tmp -- bash -c "
-                for f in /root/.config/tigervnc/*:${display}.log; do
-                    [ -f \"\$f\" ] && echo '=== \$f (HOME leaked to /root!) ===' && tail -200 \"\$f\"
-                done
-            " 2>/dev/null | sed 's/^/  /' || true
-            return 1
+        local dbus_udev_warns
+        dbus_udev_warns=$(grep -ciE "dbus|udev|netlink|bus_socket" "$log_dir/vnc.log" 2>/dev/null || echo "0")
+        if [ "$dbus_udev_warns" -gt 0 ]; then
+            log_warn "dbus/udev/netlink warnings in vnc.log ($dbus_udev_warns lines) — non-fatal in proot"
         fi
-        log_ok "Xvnc :$display stable (HOME=$base_dir, port $vnc_port responding after 2s)"
+
+        log_ok "Xvnc :$display stable (HOME=$base_dir, port $vnc_port responding after 3s)"
     fi
 
     # ─── Start websockify via proot Debian ──────────────────────────

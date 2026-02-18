@@ -1,0 +1,71 @@
+We have a real-host stability blocker on Termux(Android)+proot Debian for SwissWorkspaceGateway.
+
+Observed symptoms (from logs):
+- Xtigervnc starts for :2 on 127.0.0.1:5902, but the port disappears shortly after.
+- TigerVNC session log shows Openbox + Chromium-related errors:
+  - dbus/bus.cc: cannot connect to /run/dbus/system_bus_socket (missing)
+  - dbus: “Could not parse server address: Unknown address type”
+  - netlink socket permission denied
+  - udev monitor init failed
+  - (sometimes) “handler exception: [Errno 38] Function not implemented”
+- This correlates strongly with auto-starting Chromium inside xstartup. In proot on Android, Chromium + dbus/udev/netlink often destabilizes the VNC session.
+
+Goal:
+Make both workspaces A and B reliably stay UP with minimal GUI (Openbox + xterm) and no auto-launched browser.
+Browser launch must be optional and user-driven (manual from xterm or separate helper), not part of xstartup.
+
+Required changes:
+1) STOP auto-launching Chromium/Firefox in xstartup (both workspace_a/xstartup and workspace_b/xstartup).
+   xstartup must be minimal:
+     - unset SESSION_MANAGER, unset DBUS_SESSION_BUS_ADDRESS
+     - openbox &
+     - xterm &
+     - wait
+   No browser, no xfce, no dbus-launch.
+
+2) Add a new helper script:
+   gateway/novnc-termux/scripts/launch_browser.sh <workspace_id> <firefox|chromium> [url]
+   - It should run inside Debian with correct HOME pointing to the workspace base_dir.
+   - Prefer Firefox by default (more stable in proot).
+   - If chromium is requested, use “proot-friendly” flags:
+       --no-sandbox
+       --disable-dev-shm-usage
+       --disable-gpu
+       --disable-features=UseOzonePlatform
+     and DO NOT fail the whole workspace if chromium exits.
+
+3) Add config flags in .env.example:
+   START_BROWSER=0 (default)
+   BROWSER=firefox (default)
+   START_URL=about:blank
+   Rationale: stability-first; user can opt-in.
+
+4) Improve start_workspace.sh:
+   - Treat dbus/udev/netlink errors as WARN only.
+   - Start VNC and websockify regardless; do not rely on any GUI app to be healthy.
+   - Add “crash attribution” logging:
+       After VNC port becomes available, do NOT attempt to infer success from logs containing Chromium/dbus errors.
+       If port disappears within N seconds, print:
+         - last 80 lines of the workspace’s TigerVNC log ($base_dir/.config/tigervnc/*:${display}.log)
+         - the xstartup content used
+         - whether START_BROWSER was enabled
+     This will make regressions obvious.
+
+5) Fix healthcheck correctness:
+   Current healthcheck sometimes reports “not running” even right after start. Ensure checks are done consistently:
+   - Use run_in_debian + “export HOME=$base_dir” for per-workspace VNC checks (nc -z 127.0.0.1 $vnc_port).
+   - websockify checks should remain host-side (PID + port 608x).
+   - noVNC HTTP check should be against WEBSOCKIFY_BIND:$novnc_port.
+
+6) Acceptance criteria (real host):
+   - bash scripts/stop_workspace.sh all; bash scripts/start_workspace.sh all
+   - Both VNC ports respond inside Debian:
+       proot-distro login debian -- bash -lc 'export HOME=.../ws_a; nc -z 127.0.0.1 5901'
+       proot-distro login debian -- bash -lc 'export HOME=.../ws_b; nc -z 127.0.0.1 5902'
+   - Both noVNC endpoints return HTTP 200:
+       curl http://100.100.74.9:6080/vnc.html
+       curl http://100.100.74.9:6081/vnc.html
+   - healthcheck.sh all exits 0
+   - Browser is NOT launched unless launch_browser.sh is executed (or START_BROWSER=1 explicitly).
+
+Please implement as a PR with a short changelog. Focus on stability under proot Debian on Android (no systemd, no Docker).

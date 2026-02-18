@@ -37,11 +37,14 @@ check_single_workspace() {
     echo ""
     echo -e "${BLUE}--- Workspace ${ws_id^^} (display :$display) ---${NC}"
 
-    # ─── VNC check: Debian-side nc + ps (NOT host pgrep/ss) ──────
+    # ─── VNC check: Debian-side nc with correct HOME ─────────────
     local vnc_up=false
-    if proot-distro login "$PROOT_DISTRO" --shared-tmp -- nc -z 127.0.0.1 "$vnc_port" 2>/dev/null; then
+    if proot-distro login "$PROOT_DISTRO" --shared-tmp -- bash -c "
+        export HOME='$base_dir'
+        nc -z 127.0.0.1 $vnc_port
+    " 2>/dev/null; then
         vnc_up=true
-        hc_ok "Xvnc :$display: port $vnc_port listening (Debian-side nc)"
+        hc_ok "Xvnc :$display: port $vnc_port listening (Debian-side, HOME=$base_dir)"
     else
         local deb_ps
         deb_ps=$(proot-distro login "$PROOT_DISTRO" --shared-tmp -- bash -c \
@@ -52,13 +55,6 @@ check_single_workspace() {
         else
             hc_fail "Xvnc :$display: not running (no port, no process inside Debian)"
         fi
-    fi
-
-    # ─── VNC port (redundant with above but keeps output consistent) ─
-    if [ "$vnc_up" = true ]; then
-        hc_ok "VNC port: port $vnc_port listening"
-    else
-        hc_fail "VNC port: port $vnc_port not listening"
     fi
 
     # ─── websockify process check ────────────────────────────────
@@ -200,6 +196,8 @@ fi
 
 hc_cfg "VNC security: ${VNC_SECURITY:-VncAuth}"
 hc_cfg "websockify bind: ${WEBSOCKIFY_BIND:-__UNSET__}"
+hc_cfg "START_BROWSER: ${START_BROWSER:-0}"
+hc_cfg "BROWSER: ${BROWSER:-firefox}"
 hc_cfg "Config: $CONFIG_FILE"
 
 case "$TARGET" in
