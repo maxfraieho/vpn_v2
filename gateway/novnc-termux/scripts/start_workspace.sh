@@ -149,9 +149,13 @@ XEOF
 
     # ─── Start websockify via proot Debian ──────────────────────────
     log_info "Starting websockify ${WEBSOCKIFY_BIND}:$novnc_port -> ${bind_host}:$vnc_port (via Debian)..."
+    log_info "noVNC web dir: $NOVNC_DIR"
 
     if ! run_in_debian test -f "$NOVNC_DIR/vnc.html" 2>/dev/null; then
         log_err "noVNC web dir not accessible inside Debian at $NOVNC_DIR"
+        log_err "Resolved NOVNC_DIR=$NOVNC_DIR (from GATEWAY_DIR=$GATEWAY_DIR)"
+        log_err "Directory listing:"
+        run_in_debian ls -la "$NOVNC_DIR" 2>&1 | sed 's/^/  /' || true
         log_err "Ensure noVNC is cloned and path is under \$HOME. Re-run install_termux.sh."
         return 1
     fi

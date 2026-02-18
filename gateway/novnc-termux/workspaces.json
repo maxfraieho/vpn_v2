@@ -31,7 +31,7 @@
       "pid_dir": "$HOME/ws_b/run"
     }
   ],
-  "novnc_dir": "$HOME/gateway/novnc-termux/vendor/noVNC",
+  "novnc_dir": "auto",
   "proot_distro": "debian",
   "websockify_bind": "0.0.0.0"
 }
